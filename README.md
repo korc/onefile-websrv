@@ -2,9 +2,15 @@
 
 ## Installing
 
-For lazy people: `go run websrv.go -listen :8080`
+For lazy people:
+
+```sh
+go get golang.org/x/{crypto/acme/autocert,net/{websocket,webdav}} github.com/dgrijalva/jwt-go
+go run websrv.go -listen :8080
+```
 
 For more systematic installation:
+
 ```sh
 go build -o websrv websrv.go
 install websrv /usr/local/bin
@@ -24,29 +30,79 @@ websrv can change user id after start (required for low-level port listen and ch
 
 ### Command-line options
 
-```
+```text
 websrv -h
   -acl value
-    	<path_regexp>=<role>[+<role2..>]:<role..> (multival-arg)
+      <path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)
   -acmehost string
-    	Autocert hostnames (comma-separated), -cert will be cache dir
+      Autocert hostnames (comma-separated), -cert will be cache dir
   -acmehttp string
-    	Listen address for ACME http-01 challenge (default ":80")
+      Listen address for ACME http-01 challenge (default ":80")
   -auth value
-    	[<role>[+<role2>]=]<method>:<auth> (multivalue-arg)
+      [<role>[+<role2>]=]<method>:<auth> (multi-arg)
   -cert string
-    	SSL certificate file / autocert cache dir
+      SSL certificate file / autocert cache dir
   -chroot string
-    	chroot() to directory
+      chroot() to directory
   -key string
-    	SSL key file
+      SSL key file
   -listen string
-    	Listen ip:port (default ":80")
+      Listen ip:port (default ":80")
   -map value
-    	<path>=<handler>:[<params>] (multival-arg, default '/=file:')
+      <path>=<handler>:[<params>] (multi-arg, default '/=file:')
   -user string
-    	Switch to user (NOT RECOMMENDED)
+      Switch to user (NOT RECOMMENDED)
   -wdctype string
-    	Fix content-type for Webdav GET/POST requests
+      Fix content-type for Webdav GET/POST requests
 ```
-Options marked as `multival-arg` can be specified multiple times on commandline, and will add to existing configuration.
+
+Options marked with `multi-arg` can be specified multiple times on commandline, and will add to previous configuration. Other options are meant to be set only once.
+
+### URL path mapping
+
+- `-map` option can be used to map URL's to different handlers
+- multiple arguments on command-line will add more mappings
+- each mapping has relative URL `path` and `handler` part, with optional `parameters` for each handler type
+- `handler` parameter values:
+  - `file`
+    - simple file-based static webserver
+    - `params` is a filesystem directory path
+    - empty `params` means "current directory"
+  - `webdav`
+    - webdav handler file downloads/uploads
+    - make sure you use proper authetication
+    - `params` is a filesystem directory path
+  - `websocket`
+    - connects a websocket to TCP socket
+    - `params` will be IP:PORT for connection
+  - `http`
+    - pass-thru proxy
+    - `params` is a full URL of backend web server
+  - `debug`
+    - client request debugging
+    - shows also client certificate hash, which can be used for `-auth` option's `Cert` method
+
+### Access control
+
+- `-acl` option will define mapping between URL paths and required roles
+  - path is defined by regular expression
+  - `:` separates alternate roles (OR operation)
+  - `+` makes all specified roles to be required (AND operation)
+    - can be used to implement multi-factor auth
+- `-auth` option can be used to add new roles
+  - multiple roles can be assigned with one method
+  - `auth` value is method-specific
+  - possible values for `method` parameter
+    - `Basic`
+      - HTTP Basic authentication (WEAK security)
+      - `auth` is a Base64-encoded value of `username:password`
+    - `Cert`
+      - SSL Client X.509 certificate authentication
+      - `auth` as hex-encoded value of SHA-256 hash of certificate's binary (DER) data
+      - if `auth` starts with `file:`, certificate is read from file on disk and it's hash is used instead
+    - `CertBy`
+      - `auth` can be hex-encoded value of client CA certificate's binary
+      - `file:` in the beginning of `auth` will load CA certificate from file
+    - `JWTSecret`
+      - checks if JWT from `Authentication: Bearer` header is signed by specific authority
+      - `auth` contains authority's shared secret

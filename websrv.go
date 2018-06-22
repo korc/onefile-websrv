@@ -402,9 +402,9 @@ func main() {
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 	)
 	var authFlag, aclFlag, urlMaps arrayFlag
-	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multivalue-arg)")
-	flag.Var(&aclFlag, "acl", "<path_regexp>=<role>[+<role2..>]:<role..> (multival-arg)")
-	flag.Var(&urlMaps, "map", "<path>=<handler>:[<params>] (multival-arg, default '/=file:')")
+	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
+	flag.Var(&aclFlag, "acl", "<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
+	flag.Var(&urlMaps, "map", "<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
