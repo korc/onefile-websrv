@@ -1,0 +1,8 @@
+[Service]
+ExecStartPre=/sbin/setcap cap_net_bind_service,cap_sys_chroot=ep /usr/local/bin/websrv
+User=www-data
+PermissionsStartOnly=true
+ExecStart=/usr/local/bin/websrv -chroot /data/web -map /=file:/html/ -map /incoming/=webdav:/uploads/ -acl ^/incoming/=user -auth user=Basic:dXNlcjpwYXNzd29yZA==
+
+[Install]
+WantedBy=multi-user.target
