@@ -41,25 +41,30 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-type HttpLogger struct {
+// HTTPLogger : HTTP handler which logs requests and replies
+type HTTPLogger struct {
 	logEntryNumber uint64
 	DefaultHandler http.Handler
 }
 
+// LoggedResponseWriter : http.ResponseWriter which keeps track of status and bytes
 type LoggedResponseWriter struct {
 	origWriter   http.ResponseWriter
 	Status       int
 	BytesWritten int
 }
 
+// NewLoggedResponseWriter : create new LoggedResponseWriter instance
 func NewLoggedResponseWriter(w http.ResponseWriter) *LoggedResponseWriter {
 	return &LoggedResponseWriter{origWriter: w}
 }
 
+// Header : return headers of original writer
 func (lw *LoggedResponseWriter) Header() http.Header {
 	return lw.origWriter.Header()
 }
 
+// WriteHeader : call original writer's WriteHeader, record status
 func (lw *LoggedResponseWriter) WriteHeader(status int) {
 	lw.Status = status
 	lw.origWriter.WriteHeader(status)
@@ -70,18 +75,20 @@ func (lw *LoggedResponseWriter) Write(buf []byte) (int, error) {
 	return lw.origWriter.Write(buf)
 }
 
+// Hijack : call original writer's Hijack
 func (lw *LoggedResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return lw.origWriter.(http.Hijacker).Hijack()
 }
 
-func NewHttpLogger(h http.Handler) *HttpLogger {
+// NewHTTPLogger : create new instance of HTTPLogger handler
+func NewHTTPLogger(h http.Handler) *HTTPLogger {
 	if h == nil {
 		h = http.DefaultServeMux
 	}
-	return &HttpLogger{DefaultHandler: h}
+	return &HTTPLogger{DefaultHandler: h}
 }
 
-func (hl *HttpLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	myEntryNr := atomic.AddUint64(&hl.logEntryNumber, 1)
 	log.Printf("#%d src=%s host=%#v method=%#v path=%#v ua=%#v clen=%d", myEntryNr, r.RemoteAddr, r.Host, r.Method, r.URL.Path, r.UserAgent(), r.ContentLength)
 	lw := NewLoggedResponseWriter(w)
@@ -100,6 +107,13 @@ var oidMap = map[string]string{
 	"1.2.840.113549.1.9.1": "eMail",
 }
 
+type contextKey int
+
+const (
+	authRoleContext contextKey = iota
+)
+
+// DebugRequest returns debugging information to client
 func DebugRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	hdrs := make([]string, 0)
@@ -110,7 +124,7 @@ func DebugRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metaInfo := []string{fmt.Sprintf("remote=%v", r.RemoteAddr)}
-	if auth := r.Context().Value("auth-role"); auth != nil {
+	if auth := r.Context().Value(authRoleContext); auth != nil {
 		metaInfo = append(metaInfo, fmt.Sprintf("auth-role=%#v", auth))
 	}
 	if r.TLS != nil {
@@ -142,6 +156,7 @@ func DebugRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ConnWithDeadline is like net.Conn, but with deadline to read or write data
 type ConnWithDeadline struct {
 	Conn     net.Conn
 	Deadline time.Duration
@@ -157,6 +172,7 @@ func (c ConnWithDeadline) Write(p []byte) (n int, err error) {
 	return c.Conn.Write(p)
 }
 
+// DownloadOnlyHandler is like static file handler, but adds Content-Disposition: attachment and optionally a fixed Content-Type
 type DownloadOnlyHandler struct {
 	ContentType string
 	http.Handler
@@ -181,11 +197,13 @@ func (dh DownloadOnlyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	dh.Handler.ServeHTTP(w, r)
 }
 
+// ACLRecord maps path regexp to required roles
 type ACLRecord struct {
 	Expr  *regexp.Regexp
 	Roles map[string]bool
 }
 
+// AuthHandler passes request to next http.Handler if authorization allows
 type AuthHandler struct {
 	http.Handler
 	DefaultHandler http.Handler
@@ -193,6 +211,7 @@ type AuthHandler struct {
 	ACLs           []ACLRecord
 }
 
+// AddAuth : add authentication method to identify role(s)
 func (ah *AuthHandler) AddAuth(method, check, name string) {
 	if ah.Auths == nil {
 		ah.Auths = make(map[string]map[string]string)
@@ -232,6 +251,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 	ah.Auths[method][check] = name
 }
 
+// AddACL : add roles constraint to matching path regexp
 func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	re, err := regexp.Compile(reExpr)
 	if err != nil {
@@ -320,7 +340,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		}
 	}
 
-	ctx := context.WithValue(r.Context(), "auth-role", haveRoles)
+	ctx := context.WithValue(r.Context(), authRoleContext, haveRoles)
 	retReq := r.WithContext(ctx)
 
 	if ah.ACLs == nil {
@@ -397,7 +417,7 @@ func main() {
 		certFile   = flag.String("cert", "", "SSL certificate file or autocert cache dir")
 		keyFile    = flag.String("key", "", "SSL key file")
 		wdCType    = flag.String("wdctype", "", "Fix content-type for Webdav GET/POST requests")
-		acmeHttp   = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
+		acmeHTTP   = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
 		acmeHosts  = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 	)
@@ -470,8 +490,8 @@ func main() {
 				HostPolicy: autocert.HostWhitelist(strings.Split(*acmeHosts, ",")...),
 			}
 			tlsConfig = &tls.Config{GetCertificate: acmeManager.GetCertificate}
-			if *acmeHttp != "" {
-				go http.ListenAndServe(*acmeHttp, acmeManager.HTTPHandler(nil))
+			if *acmeHTTP != "" {
+				go http.ListenAndServe(*acmeHTTP, acmeManager.HTTPHandler(nil))
 			}
 		}
 		tlsConfig.ClientAuth = tls.RequestClientCert
@@ -575,17 +595,17 @@ func main() {
 					ws.Request().RemoteAddr, ws.RemoteAddr(), urlPath, handlerParams, copyIn, copyOut)
 			}))
 		case "http":
-			httpUrl, err := url.Parse(handlerParams)
+			httpURL, err := url.Parse(handlerParams)
 			if err != nil {
 				log.Fatalf("Cannot parse %#v as URL: %v", handlerParams, err)
 			}
-			http.Handle(urlPath, http.StripPrefix(urlPath, httputil.NewSingleHostReverseProxy(httpUrl)))
+			http.Handle(urlPath, http.StripPrefix(urlPath, httputil.NewSingleHostReverseProxy(httpURL)))
 		default:
 			log.Fatalf("Handler type %#v unknown, available: debug file webdav websocket http", urlHandler[:handlerTypeIdx])
 		}
 	}
 
-	if err := http.Serve(ln, NewHttpLogger(defaultHandler)); err != nil {
+	if err := http.Serve(ln, NewHTTPLogger(defaultHandler)); err != nil {
 		log.Fatal(err)
 	}
 }
