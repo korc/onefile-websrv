@@ -241,9 +241,9 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 				check = hex.EncodeToString(cert.Raw)
 			}
 		}
-	case "Basic", "JWTSecret":
+	case "Basic", "JWTSecret", "IPRange":
 	default:
-		log.Fatalf("Supported mechanisms: Basic, Cert, CertBy, JWTSecret. Basic auth is base64 string, certs can use file:<file.crt>")
+		log.Fatalf("Supported mechanisms: Basic, Cert, CertBy, JWTSecret, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
 	}
 	if ah.Auths[method] == nil {
 		ah.Auths[method] = make(map[string]string)
@@ -274,6 +274,26 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	}
 
 	haveRoles := make(map[string]bool)
+
+	if ipRanges, ok := ah.Auths["IPRange"]; ok {
+		remoteHostName, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			log.Fatal("Remote host not splittable? ", err)
+		}
+		remoteHost := net.ParseIP(remoteHostName)
+		for ipRange := range ipRanges {
+			_, ipNet, err := net.ParseCIDR(ipRange)
+			if err != nil {
+				log.Fatalf("IP range %#v parse error: %s", ipRange, err)
+			}
+			if ipNet.Contains(remoteHost) {
+				for _, gotRole := range strings.Split(ah.Auths["IPRange"][ipRange], "+") {
+					haveRoles[gotRole] = ah.ACLs == nil
+				}
+			}
+		}
+	}
+
 	if authHdr := r.Header.Get("Authorization"); authHdr != "" {
 		authFields := strings.SplitN(authHdr, " ", 2)
 		if len(authFields) < 2 {
