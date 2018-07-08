@@ -106,3 +106,6 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
     - `JWTSecret`
       - checks if JWT from `Authentication: Bearer` header is signed by specific authority
       - `auth` contains authority's shared secret
+    - `IPRange`
+      - checks client's remote IP
+      - `auth` is IP address with network mask length in format of `ip/masklen`
