@@ -197,6 +197,68 @@ func (dh DownloadOnlyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	dh.Handler.ServeHTTP(w, r)
 }
 
+type corsACL struct {
+	path   *regexp.Regexp
+	domain *regexp.Regexp
+}
+
+// CORSHandler adds "Access-Control-Allow-Origin" header to response if specified Origin is in request
+type CORSHandler struct {
+	http.Handler
+	allowed []corsACL
+}
+
+// AddRecord make path accessible from origin
+func (ch *CORSHandler) AddRecord(path, origin string) error {
+	if ch.allowed == nil {
+		ch.allowed = make([]corsACL, 0)
+	}
+	pathRe, err := regexp.Compile(path)
+	if err != nil {
+		return err
+	}
+	originRe, err := regexp.Compile(origin)
+	if err != nil {
+		return err
+	}
+	log.Printf("CORS: Adding origin %#v on %#v", origin, path)
+	ch.allowed = append(ch.allowed, corsACL{pathRe, originRe})
+	return nil
+}
+
+func (ch *CORSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	next := ch.Handler
+	if next == nil {
+		next = http.DefaultServeMux
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		matched := false
+		for _, acl := range ch.allowed {
+			if acl.path.MatchString(r.URL.Path) && acl.domain.MatchString(origin) {
+				matched = true
+				w.Header().Add("Access-Control-Allow-Origin", origin)
+				varyHeaders := []string{"Origin"}
+				if method := r.Header.Get("Access-Control-Request-Method"); method != "" {
+					w.Header().Add("Access-Control-Allow-Methods", "*")
+				}
+				if header := r.Header.Get("Access-Control-Request-Headers"); header != "" {
+					w.Header().Add("Access-Control-Allow-Headers", header)
+					varyHeaders = append(varyHeaders, header)
+				}
+				if r.Method == "OPTIONS" {
+					w.Header().Add("Vary", strings.Join(varyHeaders, ", "))
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+			}
+		}
+		if !matched {
+			log.Printf("CORS: Could not match origin %#v on %#v, passing to backend", origin, r.URL.Path)
+		}
+	}
+	next.ServeHTTP(w, r)
+}
+
 // ACLRecord maps path regexp to required roles
 type ACLRecord struct {
 	Expr  *regexp.Regexp
@@ -441,10 +503,11 @@ func main() {
 		acmeHosts  = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 	)
-	var authFlag, aclFlag, urlMaps arrayFlag
+	var authFlag, aclFlag, urlMaps, corsMaps arrayFlag
 	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
 	flag.Var(&aclFlag, "acl", "<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
+	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
@@ -484,6 +547,14 @@ func main() {
 					log.Fatal("Cannot add ACL: ", err)
 				}
 			}
+		}
+	}
+
+	if len(corsMaps) > 0 {
+		defaultHandler = &CORSHandler{Handler: defaultHandler}
+		for _, cors := range corsMaps {
+			pathIdx := strings.Index(cors, "=")
+			defaultHandler.(*CORSHandler).AddRecord(cors[:pathIdx], cors[pathIdx+1:])
 		}
 	}
 

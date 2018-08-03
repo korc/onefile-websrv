@@ -54,6 +54,8 @@ websrv -h
       Switch to user (NOT RECOMMENDED)
   -wdctype string
       Fix content-type for Webdav GET/POST requests
+  -cors path_re=origin_re
+      Allow `Origin` to access `path` if regexps match (cf CORS spec)
 ```
 
 Options marked with `multi-arg` can be specified multiple times on commandline, and will add to previous configuration. Other options are meant to be set only once.
