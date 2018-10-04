@@ -702,7 +702,7 @@ func main() {
 				Prefix:     urlPath,
 			}
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
-		case "websocket":
+		case "websocket", "ws":
 			http.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
 				defer logf(r, logLevelVerbose, "WS<->Sock handler finished")
 				c, err := upgrader.Upgrade(w, r, nil)
@@ -711,7 +711,13 @@ func main() {
 					return
 				}
 				defer c.Close()
-				conn, err := net.DialTimeout("tcp", handlerParams, 10*time.Second)
+				proto := "tcp"
+				address := handlerParams
+				if strings.HasPrefix(handlerParams, "unix:") {
+					proto = "unix"
+					address = handlerParams[strings.Index(handlerParams, ":")+1:]
+				}
+				conn, err := net.DialTimeout(proto, address, 10*time.Second)
 				if err != nil {
 					logf(r, logLevelError, "Connect to %#v failed: %s", handlerParams, err)
 					return
@@ -843,7 +849,7 @@ func main() {
 			}
 			http.Handle(urlPath, http.StripPrefix(urlPath, httputil.NewSingleHostReverseProxy(httpURL)))
 		default:
-			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket http", urlHandler[:handlerTypeIdx])
+			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http", urlHandler[:handlerTypeIdx])
 		}
 	}
 
