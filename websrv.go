@@ -90,10 +90,12 @@ func NewHTTPLogger(h http.Handler) *HTTPLogger {
 
 func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	myEntryNr := atomic.AddUint64(&hl.logEntryNumber, 1)
-	log.Printf("#%d src=%s host=%#v method=%#v path=%#v ua=%#v clen=%d", myEntryNr, r.RemoteAddr, r.Host, r.Method, r.URL.Path, r.UserAgent(), r.ContentLength)
 	lw := NewLoggedResponseWriter(w)
-	hl.DefaultHandler.ServeHTTP(lw, r)
-	log.Printf("#%d status=%d clen=%d", myEntryNr, lw.Status, lw.BytesWritten)
+	ctx := context.WithValue(r.Context(), "request-num", myEntryNr)
+	newReq := r.WithContext(ctx)
+	logf(newReq, logLevelInfo, "src=%s host=%#v method=%#v path=%#v ua=%#v clen=%d", r.RemoteAddr, r.Host, r.Method, r.URL.Path, r.UserAgent(), r.ContentLength)
+	hl.DefaultHandler.ServeHTTP(lw, newReq)
+	logf(newReq, logLevelInfo, "status=%d clen=%d", lw.Status, lw.BytesWritten)
 }
 
 var oidMap = map[string]string{
@@ -112,6 +114,17 @@ type contextKey int
 const (
 	authRoleContext contextKey = iota
 )
+
+const (
+	logLevelFatal int = iota
+	logLevelError
+	logLevelWarning
+	logLevelInfo
+	logLevelVerbose
+	logLevelDebug
+)
+
+var logLevelStr = []string{"FATAL", "ERROR", "WARNING", "INFO", "VERBOSE", "DEBUG"}
 
 // DebugRequest returns debugging information to client
 func DebugRequest(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +234,7 @@ func (ch *CORSHandler) AddRecord(path, origin string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("CORS: Adding origin %#v on %#v", origin, path)
+	logf(nil, logLevelInfo, "CORS: Adding origin %#v on %#v", origin, path)
 	ch.allowed = append(ch.allowed, corsACL{pathRe, originRe})
 	return nil
 }
@@ -253,7 +266,7 @@ func (ch *CORSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !matched {
-			log.Printf("CORS: Could not match origin %#v on %#v, passing to backend", origin, r.URL.Path)
+			logf(r, logLevelWarning, "CORS: Could not match origin %#v on %#v, passing to backend", origin, r.URL.Path)
 		}
 	}
 	next.ServeHTTP(w, r)
@@ -284,16 +297,16 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 		if strings.HasPrefix(check, "file:") {
 			data, err := ioutil.ReadFile(check[5:])
 			if err != nil {
-				log.Fatalf("Cannot read file %#v: %s", check[5:], err)
+				logf(nil, logLevelFatal, "Cannot read file %#v: %s", check[5:], err)
 			}
 			pemBlock, rest := pem.Decode(data)
-			log.Printf("Read pem type %s (%d bytes of date)", pemBlock.Type, len(pemBlock.Bytes))
+			logf(nil, logLevelDebug, "Read pem type %s (%d bytes of data)", pemBlock.Type, len(pemBlock.Bytes))
 			if len(rest) > 0 {
-				log.Printf("Extra %d bytes after pem", len(rest))
+				logf(nil, logLevelInfo, "Extra %d bytes after pem", len(rest))
 			}
 			cert, err := x509.ParseCertificate(pemBlock.Bytes)
 			if err != nil {
-				log.Fatalf("Could not load certificate: %s", err)
+				logf(nil, logLevelFatal, "Could not load certificate: %s", err)
 			}
 			if method == "Cert" {
 				h := sha256.New()
@@ -305,7 +318,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 		}
 	case "Basic", "JWTSecret", "IPRange":
 	default:
-		log.Fatalf("Supported mechanisms: Basic, Cert, CertBy, JWTSecret, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
+		logf(nil, logLevelFatal, "Supported mechanisms: Basic, Cert, CertBy, JWTSecret, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
 	}
 	if ah.Auths[method] == nil {
 		ah.Auths[method] = make(map[string]string)
@@ -340,13 +353,15 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	if ipRanges, ok := ah.Auths["IPRange"]; ok {
 		remoteHostName, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
-			log.Fatal("Remote host not splittable? ", err)
+			logf(r, logLevelError, "Cannot parse remote host address: %s", err)
+			return r, err
 		}
 		remoteHost := net.ParseIP(remoteHostName)
 		for ipRange := range ipRanges {
 			_, ipNet, err := net.ParseCIDR(ipRange)
 			if err != nil {
-				log.Fatalf("IP range %#v parse error: %s", ipRange, err)
+				logf(r, logLevelError, "IP range %#v parse error: %s", ipRange, err)
+				return r, err
 			}
 			if ipNet.Contains(remoteHost) {
 				for _, gotRole := range strings.Split(ah.Auths["IPRange"][ipRange], "+") {
@@ -376,7 +391,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 					return []byte(signer), nil
 				})
 				if err != nil {
-					log.Printf("Failed with secret: %#v: %s", signer, err)
+					logf(r, logLevelWarning, "Failed with secret: %#v: %s", signer, err)
 					continue
 				}
 				if token.Valid {
@@ -406,11 +421,13 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 				for pCertHex, gotRoles := range parentCerts {
 					pRaw, err := hex.DecodeString(pCertHex)
 					if err != nil {
-						log.Fatalf("Could not parse parent hex: %s", err)
+						logf(r, logLevelError, "Could not parse parent hex: %s", err)
+						return r, err
 					}
 					parentCert, err := x509.ParseCertificate(pRaw)
 					if err != nil {
-						log.Fatalf("Could not parse parent bytes: %s", err)
+						logf(r, logLevelError, "Could not parse parent bytes: %s", err)
+						return r, err
 					}
 					if err := crt.CheckSignatureFrom(parentCert); err == nil {
 						for _, role := range strings.Split(gotRoles, "+") {
@@ -495,6 +512,29 @@ var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 	return true
 }}
 
+var currentLogLevel = logLevelDebug
+
+func logf(r *http.Request, level int, format string, args ...interface{}) {
+	if level > currentLogLevel {
+		return
+	}
+	if r != nil {
+		if reqNum := r.Context().Value("request-num"); reqNum != nil {
+			format = fmt.Sprintf("#%v %s", reqNum, format)
+		}
+	}
+	logMsg := fmt.Sprintf("["+logLevelStr[level]+"] "+format, args...)
+	log.Output(2, logMsg)
+	if level == logLevelFatal {
+		for _, e := range (args) {
+			if err, ok := e.(error); ok {
+				panic(err);
+			}
+		}
+		panic(errors.New(logMsg))
+	}
+}
+
 func main() {
 	var (
 		listenAddr    = flag.String("listen", ":80", "Listen ip:port")
@@ -505,6 +545,7 @@ func main() {
 		wdCType       = flag.String("wdctype", "", "Fix content-type for Webdav GET/POST requests")
 		acmeHTTP      = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
 		wsReadTimeout = flag.Int("wstmout", 60, "Websocket alive check timer in seconds")
+		loglevelFlag  = flag.String("loglevel", "info", "Max log level (one of "+strings.Join(logLevelStr, ", ")+")")
 		acmeHosts     = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 	)
@@ -517,6 +558,13 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
 
+	currentLogLevel = logLevelInfo
+	for ll, lstr := range (logLevelStr) {
+		if strings.ToLower(lstr) == strings.ToLower(*loglevelFlag) {
+			currentLogLevel = ll
+		}
+	}
+
 	wsReadTimeoutDuration := time.Duration(*wsReadTimeout) * time.Second
 
 	if len(urlMaps) == 0 {
@@ -526,8 +574,9 @@ func main() {
 	var switchToUser *user.User
 	if *userName != "" {
 		var err error
+		logf(nil, logLevelWarning, "Switch to user is discouraged, cf. https://github.com/golang/go/issues/1435")
 		if switchToUser, err = user.Lookup(*userName); err != nil {
-			log.Fatal(err)
+			logf(nil, logLevelFatal, "Looking up user %#v failed: %s", *userName, err)
 		}
 	}
 
@@ -551,7 +600,7 @@ func main() {
 				pathIdx := strings.LastIndex(acl, "=")
 				err := defaultHandler.(*AuthHandler).AddACL(acl[:pathIdx], strings.Split(acl[pathIdx+1:], ":"))
 				if err != nil {
-					log.Fatal("Cannot add ACL: ", err)
+					logf(nil, logLevelFatal, "Cannot add ACL: %s", err)
 				}
 			}
 		}
@@ -567,9 +616,9 @@ func main() {
 
 	ln, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
-		log.Fatal(err)
+		logf(nil, logLevelFatal, "Listen on %#v failed: %s", *listenAddr, err)
 	}
-	log.Printf("Listening on %s", *listenAddr)
+	logf(nil, logLevelInfo, "Listening on %s", *listenAddr)
 	if *certFile != "" {
 		if *keyFile == "" {
 			*keyFile = *certFile
@@ -578,7 +627,7 @@ func main() {
 		if *acmeHosts == "" {
 			crt, err := tls.LoadX509KeyPair(*certFile, *keyFile)
 			if err != nil {
-				log.Fatal(err)
+				logf(nil, logLevelFatal, "Loading X509 cert from %#v and %#v failed: %s", *certFile, *keyFile, err)
 			}
 			tlsConfig = &tls.Config{Certificates: []tls.Certificate{crt}}
 		} else {
@@ -594,44 +643,44 @@ func main() {
 		}
 		tlsConfig.ClientAuth = tls.RequestClientCert
 		ln = tls.NewListener(ln, tlsConfig)
-		log.Printf("SSL enabled, cert=%s", *certFile)
+		logf(nil, logLevelInfo, "SSL enabled, cert=%s", *certFile)
 	} else {
-		log.Printf("SSL not enabled")
+		logf(nil, logLevelWarning, "SSL not enabled")
 	}
 	if *chroot != "" {
 		if err := os.Chdir(*chroot); err != nil {
-			log.Fatalf("Cannot chdir to %#v: %v", *chroot, err)
+			logf(nil, logLevelFatal, "Cannot chdir to %#v: %v", *chroot, err)
 		}
 		if err := syscall.Chroot("."); err != nil {
-			log.Fatal(err)
+			logf(nil, logLevelFatal, "Changing root to %#v failed: %s", *chroot, err)
 		}
-		log.Printf("Changed root to %#v", *chroot)
+		logf(nil, logLevelInfo, "Changed root to %#v", *chroot)
 	}
 	if switchToUser != nil {
 		gid, _ := strconv.Atoi(switchToUser.Gid)
 		uid, _ := strconv.Atoi(switchToUser.Uid)
 		if err := syscall.Setregid(gid, gid); err != nil {
-			log.Fatalf("Could not switch to gid %v: %v", gid, err)
+			logf(nil, logLevelFatal, "Could not switch to gid %v: %v", gid, err)
 		}
 		if err := syscall.Setreuid(uid, uid); err != nil {
-			log.Fatalf("Could not switch to uid %v: %v", uid, err)
+			logf(nil, logLevelFatal, "Could not switch to uid %v: %v", uid, err)
 		}
-		log.Printf("Changed to user %v/%v", uid, gid)
+		logf(nil, logLevelInfo, "Changed to user %v/%v", uid, gid)
 	}
 
 	for _, urlMap := range urlMaps {
 		pathSepIdx := strings.Index(urlMap, "=")
 		if pathSepIdx == -1 {
-			log.Fatalf("Url map %#v does not contain '='", urlMap)
+			logf(nil, logLevelFatal, "Url map %#v does not contain '='", urlMap)
 		}
 		urlPath := urlMap[:pathSepIdx]
 		urlHandler := urlMap[pathSepIdx+1:]
 		handlerTypeIdx := strings.Index(urlHandler, ":")
 		if handlerTypeIdx == -1 {
-			log.Fatalf("Handler %#v does not contain ':'", urlHandler)
+			logf(nil, logLevelFatal, "Handler %#v does not contain ':'", urlHandler)
 		}
 		handlerParams := urlHandler[handlerTypeIdx+1:]
-		log.Printf("Handling %#v as %#v (%#v)", urlPath, urlHandler[:handlerTypeIdx], handlerParams)
+		logf(nil, logLevelInfo, "Handling %#v as %#v (%#v)", urlPath, urlHandler[:handlerTypeIdx], handlerParams)
 		switch urlHandler[:handlerTypeIdx] {
 		case "debug":
 			http.HandleFunc(urlPath, DebugRequest)
@@ -655,16 +704,16 @@ func main() {
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket":
 			http.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
-				defer log.Print("WS<->Sock handler finished")
+				defer logf(r, logLevelInfo, "WS<->Sock handler finished")
 				c, err := upgrader.Upgrade(w, r, nil)
 				if err != nil {
-					log.Printf("Could not upgrade websocket: %s", err)
+					logf(r, logLevelError, "Could not upgrade websocket: %s", err)
 					return
 				}
 				defer c.Close()
 				conn, err := net.DialTimeout("tcp", handlerParams, 10*time.Second)
 				if err != nil {
-					log.Printf("Connect to %#v failed: %s", handlerParams, err)
+					logf(r, logLevelError, "Connect to %#v failed: %s", handlerParams, err)
 					return
 				}
 				defer conn.Close()
@@ -682,97 +731,97 @@ func main() {
 				dataFromWS := make(chan []byte)
 
 				go func() {
-					defer log.Printf("WSWriter finished")
+					defer logf(r, logLevelDebug, "WSWriter finished")
 					defer onceDone.Do(stopRunning)
 					for keepRunning.Load().(bool) {
 						select {
 						case data := <-dataFromConn:
-							log.Printf("data (nil=%#v) from conn", data == nil)
+							logf(r, logLevelDebug, "data (nil=%#v) from conn", data == nil)
 							if data == nil {
 								break
 							}
 							if err := c.WriteMessage(websocket.BinaryMessage, data); err != nil {
-								log.Print("Error writing to WS: ", err)
+								logf(r, logLevelError, "Error writing to WS: ", err)
 								break
 							}
 						case <-time.After(wsReadTimeoutDuration):
-							log.Printf("No input from conn in %s", wsReadTimeoutDuration)
+							logf(r, logLevelVerbose, "No input from conn in %s", wsReadTimeoutDuration)
 						}
 					}
 				}()
 				go func() {
-					defer log.Printf("SockWriter finished")
+					defer logf(r, logLevelVerbose, "SockWriter finished")
 					defer onceDone.Do(stopRunning)
 					checkingAlive := false
 					for keepRunning.Load().(bool) {
 						select {
 						case data := <-dataFromWS:
-							log.Printf("data (nil=%#v) from WS", data == nil)
+							logf(r, logLevelDebug, "data (nil=%#v) from WS", data == nil)
 							if data == nil {
 								break
 							}
 							for len(data) > 0 {
 								nWrote, err := conn.Write(data)
 								if err != nil {
-									log.Print("Error writing to socket: ", err)
+									logf(r, logLevelWarning, "Error writing to socket: ", err)
 									onceDone.Do(stopRunning)
 									break
 								}
 								data = data[nWrote:]
 							}
 						case <-time.After(wsReadTimeoutDuration):
-							log.Printf("No data from WS in %s (checkingAlive=%#v)", wsReadTimeoutDuration, checkingAlive)
+							logf(r, logLevelVerbose, "No data from WS in %s (checkingAlive=%#v)", wsReadTimeoutDuration, checkingAlive)
 							if checkingAlive {
-								log.Printf("Alive check failed.")
+								logf(r, logLevelWarning, "Alive check failed.")
 								onceDone.Do(stopRunning)
 								break
 							} else {
 								checkingAlive = true
 								c.SetPongHandler(func(appData string) error {
 									checkingAlive = false
-									log.Printf("Alive check succeeded: %#v", appData)
+									logf(r, logLevelVerbose, "Alive check succeeded: %#v", appData)
 									return nil
 								})
 								if err := c.WriteControl(websocket.PingMessage, []byte("are you alive?"), time.Now().Add(time.Second)); err != nil {
-									log.Printf("Could not send ping.")
+									logf(r, logLevelWarning, "Could not send ping.")
 									break
 								} else {
-									log.Printf("Sent ping.")
+									logf(r, logLevelDebug, "Sent ping.")
 								}
 							}
 						}
 					}
 				}()
 				go func() {
-					defer log.Printf("SockReader finished")
+					defer logf(r, logLevelDebug, "SockReader finished")
 					defer onceDone.Do(stopRunning)
 					defer close(dataFromConn)
 					for keepRunning.Load().(bool) {
 						data := make([]byte, 8192)
 						nRead, err := conn.Read(data)
 						if err != nil {
-							log.Print("Cannot read from socket: ", err)
+							logf(r, logLevelWarning, "Cannot read from socket: ", err)
 							break
 						}
 						dataFromConn <- data[:nRead]
 					}
 				}()
 				go func() {
-					defer log.Printf("WSReader finished")
+					defer logf(r, logLevelDebug, "WSReader finished")
 					defer onceDone.Do(stopRunning)
 					defer close(dataFromWS)
 					for keepRunning.Load().(bool) {
 						msgType, data, err := c.ReadMessage()
 						if err != nil {
 							if err == io.EOF {
-								log.Printf("WS EOF")
+								logf(r, logLevelInfo, "WS EOF")
 							} else {
-								log.Printf("Failed to read from WS: %#v (%s)", err, err)
+								logf(r, logLevelWarning, "Failed to read from WS: %#v (%s)", err, err)
 							}
 							break
 						}
 						if msgType != websocket.BinaryMessage {
-							log.Print("Not a binary message? ", msgType)
+							logf(r, logLevelWarning, "Not a binary message? ", msgType)
 						}
 						dataFromWS <- data
 					}
@@ -782,15 +831,15 @@ func main() {
 		case "http":
 			httpURL, err := url.Parse(handlerParams)
 			if err != nil {
-				log.Fatalf("Cannot parse %#v as URL: %v", handlerParams, err)
+				logf(nil, logLevelFatal, "Cannot parse %#v as URL: %v", handlerParams, err)
 			}
 			http.Handle(urlPath, http.StripPrefix(urlPath, httputil.NewSingleHostReverseProxy(httpURL)))
 		default:
-			log.Fatalf("Handler type %#v unknown, available: debug file webdav websocket http", urlHandler[:handlerTypeIdx])
+			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket http", urlHandler[:handlerTypeIdx])
 		}
 	}
 
 	if err := http.Serve(ln, NewHTTPLogger(defaultHandler)); err != nil {
-		log.Fatal(err)
+		logf(nil, logLevelFatal, "Cannot serve: %s", err)
 	}
 }
