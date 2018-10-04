@@ -704,7 +704,7 @@ func main() {
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket":
 			http.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
-				defer logf(r, logLevelInfo, "WS<->Sock handler finished")
+				defer logf(r, logLevelVerbose, "WS<->Sock handler finished")
 				c, err := upgrader.Upgrade(w, r, nil)
 				if err != nil {
 					logf(r, logLevelError, "Could not upgrade websocket: %s", err)
@@ -741,7 +741,7 @@ func main() {
 								break
 							}
 							if err := c.WriteMessage(websocket.BinaryMessage, data); err != nil {
-								logf(r, logLevelError, "Error writing to WS: ", err)
+								logf(r, logLevelError, "Error writing to WS: %s", err)
 								break
 							}
 						case <-time.After(wsReadTimeoutDuration):
@@ -763,7 +763,7 @@ func main() {
 							for len(data) > 0 {
 								nWrote, err := conn.Write(data)
 								if err != nil {
-									logf(r, logLevelWarning, "Error writing to socket: ", err)
+									logf(r, logLevelWarning, "Error writing to socket: %s", err)
 									onceDone.Do(stopRunning)
 									break
 								}
@@ -783,7 +783,7 @@ func main() {
 									return nil
 								})
 								if err := c.WriteControl(websocket.PingMessage, []byte("are you alive?"), time.Now().Add(time.Second)); err != nil {
-									logf(r, logLevelWarning, "Could not send ping.")
+									logf(r, logLevelError, "Could not send ping.")
 									break
 								} else {
 									logf(r, logLevelDebug, "Sent ping.")
@@ -800,7 +800,11 @@ func main() {
 						data := make([]byte, 8192)
 						nRead, err := conn.Read(data)
 						if err != nil {
-							logf(r, logLevelWarning, "Cannot read from socket: ", err)
+							if err == io.EOF {
+								logf(r, logLevelVerbose, "Socket EOF")
+							} else {
+								logf(r, logLevelWarning, "Cannot read from socket: %s", err)
+							}
 							break
 						}
 						dataFromConn <- data[:nRead]
@@ -814,14 +818,18 @@ func main() {
 						msgType, data, err := c.ReadMessage()
 						if err != nil {
 							if err == io.EOF {
-								logf(r, logLevelInfo, "WS EOF")
+								logf(r, logLevelVerbose, "WS EOF")
 							} else {
-								logf(r, logLevelWarning, "Failed to read from WS: %#v (%s)", err, err)
+								ll := logLevelWarning
+								if !keepRunning.Load().(bool) && strings.Contains(err.Error(), "use of closed network connection") {
+									ll = logLevelVerbose
+								}
+								logf(r, ll, "Failed to read from WS: %#v (%s)", err, err)
 							}
 							break
 						}
 						if msgType != websocket.BinaryMessage {
-							logf(r, logLevelWarning, "Not a binary message? ", msgType)
+							logf(r, logLevelWarning, "Not a binary message: %#v", msgType)
 						}
 						dataFromWS <- data
 					}
