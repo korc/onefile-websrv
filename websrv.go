@@ -36,9 +36,9 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/webdav"
-	"golang.org/x/net/websocket"
 )
 
 // HTTPLogger : HTTP handler which logs requests and replies
@@ -491,16 +491,21 @@ func (f *arrayFlag) Set(value string) error {
 	return nil
 }
 
+var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
+	return true
+}}
+
 func main() {
 	var (
-		listenAddr = flag.String("listen", ":80", "Listen ip:port")
-		chroot     = flag.String("chroot", "", "chroot() to directory after start")
-		userName   = flag.String("user", "", "Switch to user (NOT RECOMMENDED)")
-		certFile   = flag.String("cert", "", "SSL certificate file or autocert cache dir")
-		keyFile    = flag.String("key", "", "SSL key file")
-		wdCType    = flag.String("wdctype", "", "Fix content-type for Webdav GET/POST requests")
-		acmeHTTP   = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
-		acmeHosts  = flag.String("acmehost", "",
+		listenAddr    = flag.String("listen", ":80", "Listen ip:port")
+		chroot        = flag.String("chroot", "", "chroot() to directory after start")
+		userName      = flag.String("user", "", "Switch to user (NOT RECOMMENDED)")
+		certFile      = flag.String("cert", "", "SSL certificate file or autocert cache dir")
+		keyFile       = flag.String("key", "", "SSL key file")
+		wdCType       = flag.String("wdctype", "", "Fix content-type for Webdav GET/POST requests")
+		acmeHTTP      = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
+		wsReadTimeout = flag.Int("wstmout", 60, "Websocket alive check timer in seconds")
+		acmeHosts     = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 	)
 	var authFlag, aclFlag, urlMaps, corsMaps arrayFlag
@@ -511,6 +516,8 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
+
+	wsReadTimeoutDuration := time.Duration(*wsReadTimeout) * time.Second
 
 	if len(urlMaps) == 0 {
 		urlMaps.Set("/=file:")
@@ -647,44 +654,131 @@ func main() {
 			}
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket":
-			http.Handle(urlPath, websocket.Handler(func(ws *websocket.Conn) {
-				defer ws.Close()
+			http.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
+				defer log.Print("WS<->Sock handler finished")
+				c, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					log.Printf("Could not upgrade websocket: %s", err)
+					return
+				}
+				defer c.Close()
 				conn, err := net.DialTimeout("tcp", handlerParams, 10*time.Second)
 				if err != nil {
 					log.Printf("Connect to %#v failed: %s", handlerParams, err)
 					return
 				}
 				defer conn.Close()
-				wg := sync.WaitGroup{}
-				copyIn := 0
-				copyOut := 0
-				wg.Add(2)
+
+				var onceDone sync.Once
+				var keepRunning atomic.Value
+				keepRunning.Store(true)
+				done := make(chan struct{})
+				stopRunning := func() {
+					keepRunning.Store(false)
+					close(done)
+				}
+
+				dataFromConn := make(chan []byte)
+				dataFromWS := make(chan []byte)
+
 				go func() {
-					defer wg.Done()
-					defer ws.Close()
-					defer conn.(*net.TCPConn).CloseRead()
-					copyIn, err := io.Copy(
-						ConnWithDeadline{ws, time.Minute},
-						ConnWithDeadline{conn, time.Minute})
-					if err != nil && err != io.EOF {
-						log.Printf("copyIn failed after %v bytes: %v", copyIn, err)
+					defer log.Printf("WSWriter finished")
+					defer onceDone.Do(stopRunning)
+					for keepRunning.Load().(bool) {
+						select {
+						case data := <-dataFromConn:
+							log.Printf("data (nil=%#v) from conn", data == nil)
+							if data == nil {
+								break
+							}
+							if err := c.WriteMessage(websocket.BinaryMessage, data); err != nil {
+								log.Print("Error writing to WS: ", err)
+								break
+							}
+						case <-time.After(wsReadTimeoutDuration):
+							log.Printf("No input from conn in %s", wsReadTimeoutDuration)
+						}
 					}
 				}()
 				go func() {
-					defer wg.Done()
-					defer conn.(*net.TCPConn).CloseWrite()
-					defer ws.Close()
-					copyOut, err := io.Copy(
-						ConnWithDeadline{conn, time.Minute},
-						ConnWithDeadline{ws, time.Minute})
-					if err != nil && err != io.EOF {
-						log.Printf("copyOut failed after %v bytes: %v", copyOut, err)
+					defer log.Printf("SockWriter finished")
+					defer onceDone.Do(stopRunning)
+					checkingAlive := false
+					for keepRunning.Load().(bool) {
+						select {
+						case data := <-dataFromWS:
+							log.Printf("data (nil=%#v) from WS", data == nil)
+							if data == nil {
+								break
+							}
+							for len(data) > 0 {
+								nWrote, err := conn.Write(data)
+								if err != nil {
+									log.Print("Error writing to socket: ", err)
+									onceDone.Do(stopRunning)
+									break
+								}
+								data = data[nWrote:]
+							}
+						case <-time.After(wsReadTimeoutDuration):
+							log.Printf("No data from WS in %s (checkingAlive=%#v)", wsReadTimeoutDuration, checkingAlive)
+							if checkingAlive {
+								log.Printf("Alive check failed.")
+								onceDone.Do(stopRunning)
+								break
+							} else {
+								checkingAlive = true
+								c.SetPongHandler(func(appData string) error {
+									checkingAlive = false
+									log.Printf("Alive check succeeded: %#v", appData)
+									return nil
+								})
+								if err := c.WriteControl(websocket.PingMessage, []byte("are you alive?"), time.Now().Add(time.Second)); err != nil {
+									log.Printf("Could not send ping.")
+									break
+								} else {
+									log.Printf("Sent ping.")
+								}
+							}
+						}
 					}
 				}()
-				wg.Wait()
-				log.Printf("Finished websocket %v <-> %v <-> %v <-> %v (in=%v out=%v)",
-					ws.Request().RemoteAddr, ws.RemoteAddr(), urlPath, handlerParams, copyIn, copyOut)
-			}))
+				go func() {
+					defer log.Printf("SockReader finished")
+					defer onceDone.Do(stopRunning)
+					defer close(dataFromConn)
+					for keepRunning.Load().(bool) {
+						data := make([]byte, 8192)
+						nRead, err := conn.Read(data)
+						if err != nil {
+							log.Print("Cannot read from socket: ", err)
+							break
+						}
+						dataFromConn <- data[:nRead]
+					}
+				}()
+				go func() {
+					defer log.Printf("WSReader finished")
+					defer onceDone.Do(stopRunning)
+					defer close(dataFromWS)
+					for keepRunning.Load().(bool) {
+						msgType, data, err := c.ReadMessage()
+						if err != nil {
+							if err == io.EOF {
+								log.Printf("WS EOF")
+							} else {
+								log.Printf("Failed to read from WS: %#v (%s)", err, err)
+							}
+							break
+						}
+						if msgType != websocket.BinaryMessage {
+							log.Print("Not a binary message? ", msgType)
+						}
+						dataFromWS <- data
+					}
+				}()
+				<-done
+			})
 		case "http":
 			httpURL, err := url.Parse(handlerParams)
 			if err != nil {
