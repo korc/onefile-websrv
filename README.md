@@ -5,8 +5,8 @@
 For lazy people:
 
 ```sh
-go get golang.org/x/{crypto/acme/autocert,net/{websocket,webdav}} github.com/dgrijalva/jwt-go
-go run websrv.go -listen :8080
+go get -u github.com/korc/onefile-websrv
+go/bin/onefile-websrv -listen :8080
 ```
 
 For more systematic installation:
@@ -41,21 +41,25 @@ websrv -h
   -auth value
       [<role>[+<role2>]=]<method>:<auth> (multi-arg)
   -cert string
-      SSL certificate file / autocert cache dir
+      SSL certificate file or autocert cache dir
   -chroot string
-      chroot() to directory
+      chroot() to directory after start
   -key string
       SSL key file
   -listen string
       Listen ip:port (default ":80")
+  -loglevel string
+      Max log level (one of FATAL, ERROR, WARNING, INFO, VERBOSE, DEBUG) (default "info")
   -map value
       <path>=<handler>:[<params>] (multi-arg, default '/=file:')
   -user string
       Switch to user (NOT RECOMMENDED)
   -wdctype string
       Fix content-type for Webdav GET/POST requests
-  -cors path_re=origin_re
-      Allow `Origin` to access `path` if regexps match (cf CORS spec)
+  -cors value
+      <path>=<allowed_origin> (multi-arg)
+  -wstmout int
+      Websocket alive check timer in seconds (default 60)
 ```
 
 Options marked with `multi-arg` can be specified multiple times on commandline, and will add to previous configuration. Other options are meant to be set only once.
@@ -74,9 +78,9 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
     - webdav handler file downloads/uploads
     - make sure you use proper authetication
     - `params` is a filesystem directory path
-  - `websocket`
-    - connects a websocket to TCP socket
-    - `params` will be IP:PORT for connection
+  - `websocket` (alias `ws`)
+    - connects a websocket to TCP or UNIX socket
+    - `params` will be `IP:PORT` for TCP, or `unix:/path/socket` for UNIX socket connection
   - `http`
     - pass-thru proxy
     - `params` is a full URL of backend web server
