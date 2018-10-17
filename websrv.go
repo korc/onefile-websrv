@@ -22,6 +22,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/cgi"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -864,8 +865,10 @@ func main() {
 				logf(nil, logLevelFatal, "Cannot parse %#v as URL: %v", handlerParams, err)
 			}
 			http.Handle(urlPath, http.StripPrefix(urlPath, httputil.NewSingleHostReverseProxy(httpURL)))
+		case "cgi":
+			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: urlPath})
 		default:
-			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http", urlHandler[:handlerTypeIdx])
+			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http cgi", urlHandler[:handlerTypeIdx])
 		}
 	}
 

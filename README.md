@@ -87,6 +87,8 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
   - `debug`
     - client request debugging
     - shows also client certificate hash, which can be used for `-auth` option's `Cert` method
+  - `cgi`
+    - Run a CGI script specified by `params`
 
 ### Access control
 
