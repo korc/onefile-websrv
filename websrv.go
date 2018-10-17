@@ -274,8 +274,9 @@ func (ch *CORSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ACLRecord maps path regexp to required roles
 type ACLRecord struct {
-	Expr  *regexp.Regexp
-	Roles map[string]bool
+	Expr    *regexp.Regexp
+	Roles   map[string]bool
+	Methods map[string]bool
 }
 
 // AuthHandler passes request to next http.Handler if authorization allows
@@ -328,6 +329,15 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 
 // AddACL : add roles constraint to matching path regexp
 func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
+	var methods map[string]bool
+	if strings.HasPrefix(reExpr, "{") {
+		clidx := strings.Index(reExpr, "}")
+		methods = make(map[string]bool)
+		for _, v := range strings.Split(reExpr[1:clidx], ",") {
+			methods[v] = true
+		}
+		reExpr = reExpr[clidx+1:]
+	}
 	re, err := regexp.Compile(reExpr)
 	if err != nil {
 		return err
@@ -335,7 +345,7 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	if ah.ACLs == nil {
 		ah.ACLs = make([]ACLRecord, 0)
 	}
-	rec := ACLRecord{re, make(map[string]bool)}
+	rec := ACLRecord{re, make(map[string]bool), methods}
 	for _, r := range roles {
 		rec.Roles[r] = true
 	}
@@ -451,7 +461,13 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 
 	neededRoles := make(map[string]bool)
 	for _, acl := range ah.ACLs {
-		if acl.Expr.MatchString(r.URL.Path) {
+		methodMatch := true
+		if acl.Methods != nil {
+			if _, ok := acl.Methods[r.Method]; !ok {
+				methodMatch = false
+			}
+		}
+		if methodMatch && acl.Expr.MatchString(r.URL.Path) {
 			neededRoles = acl.Roles
 			break
 		}
@@ -526,9 +542,9 @@ func logf(r *http.Request, level int, format string, args ...interface{}) {
 	logMsg := fmt.Sprintf("["+logLevelStr[level]+"] "+format, args...)
 	log.Output(2, logMsg)
 	if level == logLevelFatal {
-		for _, e := range (args) {
+		for _, e := range args {
 			if err, ok := e.(error); ok {
-				panic(err);
+				panic(err)
 			}
 		}
 		panic(errors.New(logMsg))
@@ -559,7 +575,7 @@ func main() {
 	flag.Parse()
 
 	currentLogLevel = logLevelInfo
-	for ll, lstr := range (logLevelStr) {
+	for ll, lstr := range logLevelStr {
 		if strings.ToLower(lstr) == strings.ToLower(*loglevelFlag) {
 			currentLogLevel = ll
 		}

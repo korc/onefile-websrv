@@ -33,7 +33,7 @@ websrv can change user id after start (required for low-level port listen and ch
 ```text
 websrv -h
   -acl value
-      <path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)
+      [{<methods..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)
   -acmehost string
       Autocert hostnames (comma-separated), -cert will be cache dir
   -acmehttp string
@@ -92,6 +92,7 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 
 - `-acl` option will define mapping between URL paths and required roles
   - path is defined by regular expression
+  - you can specify HTTP methods (GET, POST etc) separated with commas in curly braces before path regexp
   - `:` separates alternate roles (OR operation)
   - `+` makes all specified roles to be required (AND operation)
     - can be used to implement multi-factor auth
