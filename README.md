@@ -84,6 +84,8 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
   - `http`
     - pass-thru proxy
     - `params` is a full URL of backend web server
+    - `params` can be prefixed with comma-separated connection options between `{` and `}`
+      - `cert` and `key` options to set TLS client cert/key files
   - `debug`
     - client request debugging
     - shows also client certificate hash, which can be used for `-auth` option's `Cert` method

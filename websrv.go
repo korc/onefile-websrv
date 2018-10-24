@@ -860,11 +860,39 @@ func main() {
 				<-done
 			})
 		case "http":
+			connectParams := make(map[string]string)
+			if strings.HasPrefix(handlerParams, "{") {
+				ebIndex := strings.Index(handlerParams, "}")
+				if ebIndex < 0 {
+					log.Fatal("Cannot find parameters before URL")
+				}
+				for _, s := range strings.Split(handlerParams[1:ebIndex], ",") {
+					kv := strings.SplitN(s, "=", 2)
+					connectParams[kv[0]] = kv[1]
+				}
+				handlerParams = handlerParams[ebIndex+1:]
+			}
 			httpURL, err := url.Parse(handlerParams)
 			if err != nil {
 				logf(nil, logLevelFatal, "Cannot parse %#v as URL: %v", handlerParams, err)
 			}
-			http.Handle(urlPath, http.StripPrefix(urlPath, httputil.NewSingleHostReverseProxy(httpURL)))
+			prxHandler := httputil.NewSingleHostReverseProxy(httpURL)
+			if certFile, ok := connectParams["cert"]; ok {
+				keyFile := connectParams["key"]
+				if keyFile == "" {
+					keyFile = certFile
+				}
+				cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+				if err != nil {
+					log.Fatalf("Cannot load cert/key from %#v and %#v: %s", certFile, keyFile, err)
+				}
+				prxHandler.Transport = &http.Transport{
+					TLSClientConfig: &tls.Config{
+						Certificates: []tls.Certificate{cert},
+					},
+				}
+			}
+			http.Handle(urlPath, http.StripPrefix(urlPath, prxHandler))
 		case "cgi":
 			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: urlPath})
 		default:
