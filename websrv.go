@@ -894,7 +894,33 @@ func main() {
 			}
 			http.Handle(urlPath, http.StripPrefix(urlPath, prxHandler))
 		case "cgi":
-			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: urlPath})
+			var env, inhEnv, args []string
+			if strings.HasPrefix(handlerParams, "{") {
+				ebIndex := strings.Index(handlerParams, "}")
+				if ebIndex < 0 {
+					logf(nil, logLevelFatal, "No end brace")
+				}
+				for _, v := range strings.Split(handlerParams[1:ebIndex], ",") {
+					if strings.HasPrefix(v, "arg:") {
+						if args == nil {
+							args = make([]string, 0)
+						}
+						args = append(args, v[4:])
+					} else if eqIndex := strings.Index(v, "="); eqIndex < 0 {
+						if inhEnv == nil {
+							inhEnv = make([]string, 0)
+						}
+						inhEnv = append(inhEnv, v)
+					} else {
+						if env == nil {
+							env = make([]string, 0)
+						}
+						env = append(env, v)
+					}
+				}
+				handlerParams = handlerParams[ebIndex+1:]
+			}
+			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPath, "/"), Env: env, InheritEnv: inhEnv, Args: args})
 		default:
 			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http cgi", urlHandler[:handlerTypeIdx])
 		}

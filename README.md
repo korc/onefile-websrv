@@ -90,7 +90,11 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
     - client request debugging
     - shows also client certificate hash, which can be used for `-auth` option's `Cert` method
   - `cgi`
-    - Run a CGI script specified by `params`
+    - Run a CGI script specified by `params`.
+    - Before program name, can specify environment and args with `{` `}`
+      - Example: `{AAAA,BBBB=123,arg:--dir,arg:/var/www}/usr/lib/cgi/program`
+        - `AAAA` will be copied from host env, `BBBB` will be set to `123`, program will be executed with 2 arguments:
+         `--dir` and `/var/www`
 
 ### Access control
 
