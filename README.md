@@ -2,14 +2,23 @@
 
 ## Installing
 
-For lazy people:
+### For lazy people (who have Go)
 
 ```sh
 go get -u github.com/korc/onefile-websrv
 go/bin/onefile-websrv -listen :8080
 ```
 
-For more systematic installation:
+### With Docker
+
+Serving content from `/data/web/html`:
+
+```sh
+docker build -t websrv https://github.com/korc/onefile-websrv.git
+docker run --name websrv -u 33:33 -p 80:8080 -v /data/web:/var/www websrv -listen :8080
+```
+
+### For more systematic installation
 
 ```sh
 go build -o websrv websrv.go
