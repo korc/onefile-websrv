@@ -8,11 +8,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -46,6 +48,7 @@ import (
 type HTTPLogger struct {
 	logEntryNumber uint64
 	DefaultHandler http.Handler
+	remoteLogger   *RemoteLogger
 }
 
 // LoggedResponseWriter : http.ResponseWriter which keeps track of status and bytes
@@ -82,11 +85,32 @@ func (lw *LoggedResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 // NewHTTPLogger : create new instance of HTTPLogger handler
-func NewHTTPLogger(h http.Handler) *HTTPLogger {
+func NewHTTPLogger(h http.Handler, rl *RemoteLogger) *HTTPLogger {
 	if h == nil {
 		h = http.DefaultServeMux
 	}
-	return &HTTPLogger{DefaultHandler: h}
+	return &HTTPLogger{DefaultHandler: h, remoteLogger: rl}
+}
+
+type RemoteLogger struct {
+	RemoteLogURL string
+}
+
+func (rl *RemoteLogger) log(logType string, msg interface{}) error {
+	logData, err := json.Marshal(struct {
+		Type    string
+		Stamp   time.Time
+		Message interface{}
+	}{logType, time.Now(), msg})
+	if err != nil {
+		return err
+	}
+	go func() {
+		if resp, err := http.DefaultClient.Post(rl.RemoteLogURL, "application/log", bytes.NewBuffer(logData)); err != nil {
+			logf(nil, logLevelError, "Cannot submit log[%s]: %s (%#v)", logType, err, resp)
+		}
+	}()
+	return nil
 }
 
 func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -94,9 +118,87 @@ func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	lw := NewLoggedResponseWriter(w)
 	ctx := context.WithValue(r.Context(), "request-num", myEntryNr)
 	newReq := r.WithContext(ctx)
+	requestLogged := false
+	if hl.remoteLogger != nil {
+		if err := hl.remoteLogger.log("request-start", struct {
+			RequestNum uint64
+			RemoteAddr string
+			Method     string
+			Path       string
+			Headers    http.Header
+		}{myEntryNr, r.RemoteAddr, r.Method, r.URL.Path, r.Header}); err != nil {
+			logf(newReq, logLevelError, "Could not log request: %s", err)
+		} else {
+			requestLogged = true
+		}
+	}
 	logf(newReq, logLevelInfo, "src=%s host=%#v method=%#v path=%#v ua=%#v clen=%d", r.RemoteAddr, r.Host, r.Method, r.URL.Path, r.UserAgent(), r.ContentLength)
 	hl.DefaultHandler.ServeHTTP(lw, newReq)
+	if requestLogged {
+		hl.remoteLogger.log("request-end", struct {
+			RequestNum   uint64
+			BytesWritten int
+			Status       int
+		}{myEntryNr, lw.BytesWritten, lw.Status})
+	}
 	logf(newReq, logLevelInfo, "status=%d clen=%d", lw.Status, lw.BytesWritten)
+}
+
+type LoggedListener struct {
+	net.Listener
+	remoteLogger *RemoteLogger
+}
+
+type LoggedConnection struct {
+	net.Conn
+	remoteLogger *RemoteLogger
+}
+
+func (c LoggedConnection) Close() error {
+	c.remoteLogger.log("connection-close", struct {
+		RemoteAddr string
+	}{c.RemoteAddr().String()})
+	return c.Conn.Close()
+}
+
+type tlsInfoLogMessage struct {
+	Version          uint16
+	DidResume        bool
+	CipherSuite      uint16
+	ServerName       string `json:",omitempty"`
+	PeerCertificates [][]byte
+	TLSUnique        []byte
+}
+
+func (l LoggedListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	var tlsInfo interface{}
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		if err := tlsConn.Handshake(); err != nil {
+			tlsInfo = struct {
+				HandshakeError string
+			}{err.Error()}
+		} else {
+			cs := tlsConn.ConnectionState();
+			tlsInfo = &tlsInfoLogMessage{cs.Version, cs.DidResume, cs.CipherSuite, cs.ServerName, [][]byte{}, cs.TLSUnique}
+			for _, v := range cs.PeerCertificates {
+				tlsInfo.(*tlsInfoLogMessage).PeerCertificates = append(tlsInfo.(*tlsInfoLogMessage).PeerCertificates, v.Raw)
+			}
+		}
+		//tlsInfo = struct {
+		//	TLSVersion    uint16
+		//	ServerName string
+		//	Certs      []*x509.Certificate
+		//}{cstate.Version, cstate.ServerName, cstate.PeerCertificates}
+	}
+	if err := l.remoteLogger.log("connection-accept", struct {
+		RemoteAddr string
+		LocalAddr  string
+		Tls        interface{} `json:",omitempty"`
+	}{conn.RemoteAddr().String(), conn.LocalAddr().String(), tlsInfo}); err != nil {
+		logf(nil, logLevelError, "Cannot send accept info: %s", err)
+	}
+	return LoggedConnection{conn, l.remoteLogger}, err
 }
 
 var oidMap = map[string]string{
@@ -563,6 +665,7 @@ func main() {
 		acmeHTTP      = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
 		wsReadTimeout = flag.Int("wstmout", 60, "Websocket alive check timer in seconds")
 		loglevelFlag  = flag.String("loglevel", "info", "Max log level (one of "+strings.Join(logLevelStr, ", ")+")")
+		reqlog        = flag.String("reqlog", "", "URL to log request details to")
 		acmeHosts     = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 	)
@@ -926,7 +1029,17 @@ func main() {
 		}
 	}
 
-	if err := http.Serve(ln, NewHTTPLogger(defaultHandler)); err != nil {
+	var rl *RemoteLogger
+
+	if *reqlog != "" {
+		rl = &RemoteLogger{*reqlog}
+		ln = LoggedListener{ln, rl}
+		rl.log("server-start", struct {
+			ListenAddress string
+		}{*listenAddr})
+	}
+
+	if err := http.Serve(ln, NewHTTPLogger(defaultHandler, rl)); err != nil {
 		logf(nil, logLevelFatal, "Cannot serve: %s", err)
 	}
 }

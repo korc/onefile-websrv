@@ -69,6 +69,8 @@ websrv -h
       <path>=<allowed_origin> (multi-arg)
   -wstmout int
       Websocket alive check timer in seconds (default 60)
+  -reqlog string
+      URL to log request details to
 ```
 
 Options marked with `multi-arg` can be specified multiple times on commandline, and will add to previous configuration. Other options are meant to be set only once.
