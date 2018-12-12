@@ -2,14 +2,30 @@
 
 ## Installing
 
-### For lazy people (who have Go)
+### Quick-start examples
+
+#### Serving current directory on port 8080
+
+(You need [Go](https://golang.org/dl/) to be installed)
 
 ```sh
 go get -u github.com/korc/onefile-websrv
 go/bin/onefile-websrv -listen :8080
 ```
 
-### With Docker
+#### Public HTTPS server with valid, auto-generated Let's Encrypt certificates
+
+(replace `example.com` with your real public hostname)
+
+```sh
+go get -u github.com/korc/onefile-websrv
+mkdir acme-certs
+sudo go/bin/onefile-websrv -listen :443 -acmehost example.com -cert $PWD/acme-certs -map /=file:/var/www
+```
+
+Check out systemd approach below for more secure setup.
+
+#### With Docker
 
 Serving content from `/data/web/html`:
 
@@ -21,13 +37,12 @@ docker run --name websrv -u 33:33 -p 80:8080 -v /data/web:/var/www websrv -liste
 ### For more systematic installation
 
 ```sh
-go build -o websrv websrv.go
-install websrv /usr/local/bin
-install -m 0644 websrv.service /etc/systemd/system/
+apt-get install libcap2-bin
+go get -u github.com/korc/onefile-websrv
+install go/bin/onefile-websrv /usr/local/bin/websrv
+install -m 0644 go/src/github.com/korc/onefile-websrv/websrv.service /etc/systemd/system/
 vi /etc/systemd/system/websrv.service
-systemctl daemon-reload
-systemctl enable websrv
-systemctl start websrv
+systemctl daemon-reload && systemctl enable websrv && systemctl start websrv
 systemctl status websrv
 ```
 
