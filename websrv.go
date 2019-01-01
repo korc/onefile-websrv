@@ -124,15 +124,15 @@ func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RequestNum uint64
 			RemoteAddr string
 			Method     string
-			Path       string
+			URI        string
 			Headers    http.Header
-		}{myEntryNr, r.RemoteAddr, r.Method, r.URL.Path, r.Header}); err != nil {
+		}{myEntryNr, r.RemoteAddr, r.Method, r.RequestURI, r.Header}); err != nil {
 			logf(newReq, logLevelError, "Could not log request: %s", err)
 		} else {
 			requestLogged = true
 		}
 	}
-	logf(newReq, logLevelInfo, "src=%s host=%#v method=%#v path=%#v ua=%#v clen=%d", r.RemoteAddr, r.Host, r.Method, r.URL.Path, r.UserAgent(), r.ContentLength)
+	logf(newReq, logLevelInfo, "src=%s host=%#v method=%#v uri=%#v ua=%#v clen=%d", r.RemoteAddr, r.Host, r.Method, r.RequestURI, r.UserAgent(), r.ContentLength)
 	hl.DefaultHandler.ServeHTTP(lw, newReq)
 	if requestLogged {
 		hl.remoteLogger.log("request-end", struct {
