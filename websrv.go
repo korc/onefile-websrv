@@ -377,9 +377,10 @@ func (ch *CORSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ACLRecord maps path regexp to required roles
 type ACLRecord struct {
-	Expr    *regexp.Regexp
-	Roles   map[string]bool
-	Methods map[string]bool
+	Expr     *regexp.Regexp
+	Roles    map[string]bool
+	Methods  map[string]bool
+	MatchURI bool
 }
 
 // AuthHandler passes request to next http.Handler if authorization allows
@@ -433,6 +434,11 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 // AddACL : add roles constraint to matching path regexp
 func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	var methods map[string]bool
+	matchURI := false
+	if strings.HasPrefix(reExpr, "?") {
+		matchURI = true
+		reExpr = reExpr[1:]
+	}
 	if strings.HasPrefix(reExpr, "{") {
 		clidx := strings.Index(reExpr, "}")
 		methods = make(map[string]bool)
@@ -448,7 +454,7 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	if ah.ACLs == nil {
 		ah.ACLs = make([]ACLRecord, 0)
 	}
-	rec := ACLRecord{re, make(map[string]bool), methods}
+	rec := ACLRecord{re, make(map[string]bool), methods, matchURI}
 	for _, r := range roles {
 		rec.Roles[r] = true
 	}
@@ -570,7 +576,11 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 				methodMatch = false
 			}
 		}
-		if methodMatch && acl.Expr.MatchString(r.URL.Path) {
+		testString := r.URL.Path
+		if acl.MatchURI {
+			testString = r.RequestURI
+		}
+		if methodMatch && acl.Expr.MatchString(testString) {
 			neededRoles = acl.Roles
 			break
 		}
