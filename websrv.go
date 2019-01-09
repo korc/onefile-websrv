@@ -835,7 +835,11 @@ func main() {
 		case "websocket", "ws":
 			http.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
 				defer logf(r, logLevelVerbose, "WS<->Sock handler finished")
-				c, err := upgrader.Upgrade(w, r, nil)
+				var respHeader http.Header
+				if subproto := r.Header.Get("Sec-Websocket-Protocol"); subproto != "" {
+					respHeader = http.Header{"Sec-Websocket-Protocol": {subproto}}
+				}
+				c, err := upgrader.Upgrade(w, r, respHeader)
 				if err != nil {
 					logf(r, logLevelError, "Could not upgrade websocket: %s", err)
 					return
