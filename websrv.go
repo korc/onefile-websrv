@@ -10,9 +10,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -22,6 +24,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/cgi"
@@ -421,9 +424,9 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 				check = hex.EncodeToString(cert.Raw)
 			}
 		}
-	case "Basic", "JWTSecret", "IPRange":
+	case "Basic", "JWTSecret", "IPRange", "JWTFilePat":
 	default:
-		logf(nil, logLevelFatal, "Supported mechanisms: Basic, Cert, CertBy, JWTSecret, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
+		logf(nil, logLevelFatal, "Supported mechanisms: Basic, Cert, CertBy, JWTSecret, JWTFilePat, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
 	}
 	if ah.Auths[method] == nil {
 		ah.Auths[method] = make(map[string]string)
@@ -465,6 +468,24 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	if ah.Auths == nil {
 		return r, nil
+	}
+
+	neededRoles := make(map[string]bool)
+	for _, acl := range ah.ACLs {
+		methodMatch := true
+		if acl.Methods != nil {
+			if _, ok := acl.Methods[r.Method]; !ok {
+				methodMatch = false
+			}
+		}
+		testString := r.URL.Path
+		if acl.MatchURI {
+			testString = r.RequestURI
+		}
+		if methodMatch && acl.Expr.MatchString(testString) {
+			neededRoles = acl.Roles
+			break
+		}
 	}
 
 	haveRoles := make(map[string]bool)
@@ -519,6 +540,81 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 					}
 				}
 			}
+			for fpath := range ah.Auths["JWTFilePat"] {
+				// authValue is file path. '**' in filename will be tested in order of:
+				// URL, URL without file extension, without filename, with all path components removed one by one
+				haveStars := strings.Index(fpath, "**") != -1
+				if haveStars && len(neededRoles) == 0 {
+					break
+				}
+				testUrl := r.URL.Path
+				testList := []string{strings.Replace(fpath, "**", testUrl[1:], 1)}
+				if haveStars {
+					slashIdx := strings.LastIndex(testUrl, "/")
+					for {
+						dotIdx := strings.LastIndex(testUrl, ".")
+						if dotIdx <= slashIdx {
+							break
+						}
+						testUrl = testUrl[:dotIdx]
+						testList = append(testList, strings.Replace(fpath, "**", testUrl[1:], 1))
+					}
+					for slashIdx > 0 {
+						testUrl = testUrl[:slashIdx]
+						testList = append(testList, strings.Replace(fpath, "**", testUrl[1:], 1))
+						slashIdx = strings.LastIndex(testUrl, "/")
+					}
+				}
+				for _, testPath := range testList {
+					logf(r, logLevelDebug, "Testing JWT auth file at %#v", testPath)
+					if file, err := os.Open(testPath); err == nil {
+						defer file.Close()
+						tkn, err := jwt.Parse(authValue, func(token *jwt.Token) (i interface{}, e error) {
+							linescanner := bufio.NewScanner(file)
+							for linescanner.Scan() {
+								line := strings.SplitN(linescanner.Text(), ":", 2)
+								if line[0][:1] == "#" {
+									continue
+								}
+								if len(line) < 2 {
+									logf(r, logLevelError, "Line in JWT file %#v does not contain ':'", testPath)
+									continue
+								}
+								decodedVal, err := base64.RawURLEncoding.DecodeString(line[1])
+								if err != nil {
+									logf(r, logLevelError, "Cannot decode base64 of value in %#v", testPath)
+									continue
+								}
+								switch line[0] {
+								case "hmac":
+									if _, ok := token.Method.(*jwt.SigningMethodHMAC); ok {
+										return []byte(decodedVal), nil
+									}
+								case "rsa":
+									if _, ok := token.Method.(*jwt.SigningMethodRSA); ok {
+										return &rsa.PublicKey{N: (&big.Int{}).SetBytes(decodedVal), E: 0x10001}, nil
+									}
+								default:
+									logf(r, logLevelWarning, "unsupported mechanism %#v in JWT keyfile", line[0])
+								}
+							}
+							return
+						})
+						if err != nil {
+							logf(r, logLevelWarning, "Could not parse auth token: %s", err)
+							break
+						}
+						if tkn.Valid {
+							for _, gotRole := range strings.Split(ah.Auths["JWTFilePat"][fpath], "+") {
+								haveRoles[gotRole] = ah.ACLs == nil
+							}
+						}
+						break
+						logf(r, logLevelDebug, "Searching for JWT file from %#v for URL %#v (authvalue=%#v)",
+							testPath, r.URL.Path, authValue)
+					}
+				}
+			}
 		default:
 			return nil, errors.New("unsupported method")
 		}
@@ -568,24 +664,6 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		return nil, errors.New("need auth")
 	}
 
-	neededRoles := make(map[string]bool)
-	for _, acl := range ah.ACLs {
-		methodMatch := true
-		if acl.Methods != nil {
-			if _, ok := acl.Methods[r.Method]; !ok {
-				methodMatch = false
-			}
-		}
-		testString := r.URL.Path
-		if acl.MatchURI {
-			testString = r.RequestURI
-		}
-		if methodMatch && acl.Expr.MatchString(testString) {
-			neededRoles = acl.Roles
-			break
-		}
-	}
-
 	if len(neededRoles) == 0 {
 		return retReq, nil
 	}
@@ -616,7 +694,9 @@ func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		for k := range ah.Auths {
 			switch k {
-			case "Cert", "CertBy", "JWTSecret":
+			case "JWTSecret", "JWTFilePat":
+				w.Header().Add("WWW-Authenticate", "Bearer realm=\"Authentication required\"")
+			case "Cert", "CertBy":
 			default:
 				w.Header().Add("WWW-Authenticate", fmt.Sprintf("%s realm=\"auth-required\"", k))
 			}

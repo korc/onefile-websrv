@@ -150,3 +150,16 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
     - `IPRange`
       - checks client's remote IP
       - `auth` is IP address with network mask length in format of `ip/masklen`
+    - `JWTFilePat`
+      - `auth` specifies file (pattern) containing accepted JWT tokens signed with:
+        - secrets, in format of `hash:url-base64-encoded-secret`
+        - RSA public keys, in format of `rsa:base64-encoded-n-value`
+          - `e` is assumed to be `0x10001`
+      - if letters "`**`" are found inside filename, they are replaced with pattern constructed from:
+        - URL path, URL path with extensions of last element removed (one-by-one), and each path component removed one-by-one from the end
+        - Ex: `-acl ^/adm/=xxx -auth xxx=JWTFilePat:/data/webauth/**.jwt` and access to `/adm/test.123.html` will result in checking of files
+            - `/data/webauth/adm/test.123.html.jwt`
+            - `/data/webauth/adm/test.123.jwt`
+            - `/data/webauth/adm/test.jwt`
+            - `/data/webauth/adm.jwt`
+        - because of cost associatd checking for `.jwt` files, auth is applied only when path requires authentication
