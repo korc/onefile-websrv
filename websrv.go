@@ -1074,6 +1074,17 @@ func main() {
 				logf(nil, logLevelFatal, "Cannot parse %#v as URL: %v", handlerParams, err)
 			}
 			prxHandler := httputil.NewSingleHostReverseProxy(httpURL)
+
+			defaultDirector := prxHandler.Director
+			prxHandler.Director = func(request *http.Request) {
+				defaultDirector(request)
+				if *certFile != "" {
+					request.Header.Set("X-Forwarded-Proto", "https")
+				} else {
+					request.Header.Set("X-Forwarded-Proto", "http")
+				}
+			}
+
 			if certFile, ok := connectParams["cert"]; ok {
 				keyFile := connectParams["key"]
 				if keyFile == "" {
