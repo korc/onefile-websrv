@@ -791,6 +791,7 @@ func main() {
 	}
 
 	var defaultHandler http.Handler
+	haveCertAuth := false
 
 	if len(authFlag) > 0 {
 		defaultHandler = &AuthHandler{}
@@ -803,7 +804,12 @@ func main() {
 			} else {
 				tagIdx = -1
 			}
-			defaultHandler.(*AuthHandler).AddAuth(auth[tagIdx+1:methodIdx], auth[methodIdx+1:], role)
+			authMethod := auth[tagIdx+1 : methodIdx]
+			switch authMethod {
+			case "Cert", "CertBy":
+				haveCertAuth = true
+			}
+			defaultHandler.(*AuthHandler).AddAuth(authMethod, auth[methodIdx+1:], role)
 		}
 		if len(aclFlag) > 0 {
 			for _, acl := range aclFlag {
@@ -851,7 +857,10 @@ func main() {
 				go http.ListenAndServe(*acmeHTTP, acmeManager.HTTPHandler(nil))
 			}
 		}
-		tlsConfig.ClientAuth = tls.RequestClientCert
+		if haveCertAuth {
+			tlsConfig.ClientAuth = tls.RequestClientCert
+			logf(nil, logLevelInfo, "X509 auth enabled")
+		}
 		ln = tls.NewListener(ln, tlsConfig)
 		logf(nil, logLevelInfo, "SSL enabled, cert=%s", *certFile)
 	} else {
