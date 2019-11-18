@@ -106,7 +106,10 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
     - `params` is a filesystem directory path
   - `websocket` (alias `ws`)
     - connects a websocket to TCP or UNIX socket
-    - `params` will be `IP:PORT` for TCP, or `unix:/path/socket` for UNIX socket connection
+    - `params` can be be
+      - `HOST:PORT` to connection via TCP to _HOST:PORT_
+      - `tls:HOST:PORT` to connect using TLS over TCP
+      - `unix:/PATH/SOCKET` for UNIX socket
   - `http`
     - pass-thru proxy
     - `params` is a full URL of backend web server

@@ -182,7 +182,7 @@ func (l LoggedListener) Accept() (net.Conn, error) {
 				HandshakeError string
 			}{err.Error()}
 		} else {
-			cs := tlsConn.ConnectionState();
+			cs := tlsConn.ConnectionState()
 			tlsInfo = &tlsInfoLogMessage{cs.Version, cs.DidResume, cs.CipherSuite, cs.ServerName, [][]byte{}, cs.TLSUnique}
 			for _, v := range cs.PeerCertificates {
 				tlsInfo.(*tlsInfoLogMessage).PeerCertificates = append(tlsInfo.(*tlsInfoLogMessage).PeerCertificates, v.Raw)
@@ -940,10 +940,19 @@ func main() {
 					proto = "unix"
 					address = handlerParams[strings.Index(handlerParams, ":")+1:]
 				}
-				conn, err := net.DialTimeout(proto, address, 10*time.Second)
-				if err != nil {
-					logf(r, logLevelError, "Connect to %#v failed: %s", handlerParams, err)
-					return
+				var conn net.Conn
+				if strings.HasPrefix(handlerParams, "tls:") {
+					conn, err = tls.Dial("tcp", handlerParams[strings.Index(handlerParams, ":")+1:], &tls.Config{})
+					if err != nil {
+						logf(r, logLevelError, "Connect with TLS to %#v failed: %s", handlerParams, err)
+						return
+					}
+				} else {
+					conn, err = net.DialTimeout(proto, address, 10*time.Second)
+					if err != nil {
+						logf(r, logLevelError, "Connect to %#v failed: %s", handlerParams, err)
+						return
+					}
 				}
 				defer conn.Close()
 
