@@ -101,15 +101,15 @@ type RemoteLogger struct {
 
 func (rl *RemoteLogger) log(logType string, msg interface{}) error {
 	logData, err := json.Marshal(struct {
-		Type    string
-		Stamp   time.Time
-		Message interface{}
+		Type    string      `json:"type"`
+		Stamp   time.Time   `json:"stamp"`
+		Message interface{} `json:"message"`
 	}{logType, time.Now(), msg})
 	if err != nil {
 		return err
 	}
 	go func() {
-		if resp, err := http.DefaultClient.Post(rl.RemoteLogURL, "application/log", bytes.NewBuffer(logData)); err != nil {
+		if resp, err := http.DefaultClient.Post(rl.RemoteLogURL, "application/json", bytes.NewBuffer(logData)); err != nil {
 			logf(nil, logLevelError, "Cannot submit log[%s]: %s (%#v)", logType, err, resp)
 		}
 	}()
