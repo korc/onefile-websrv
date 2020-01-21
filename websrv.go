@@ -111,6 +111,10 @@ func (rl *RemoteLogger) log(logType string, msg interface{}) error {
 	go func() {
 		if resp, err := http.DefaultClient.Post(rl.RemoteLogURL, "application/json", bytes.NewBuffer(logData)); err != nil {
 			logf(nil, logLevelError, "Cannot submit log[%s]: %s (%#v)", logType, err, resp)
+		} else {
+			if err := resp.Body.Close(); err != nil {
+				logf(nil, logLevelWarning, "Cannot close body of log submit: %s", err)
+			}
 		}
 	}()
 	return nil
