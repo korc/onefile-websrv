@@ -748,6 +748,22 @@ func logf(r *http.Request, level int, format string, args ...interface{}) {
 	}
 }
 
+func parseCurlyParams(handlerParams string) (map[string]string, string) {
+	connectParams := make(map[string]string)
+	if strings.HasPrefix(handlerParams, "{") {
+		ebIndex := strings.Index(handlerParams, "}")
+		if ebIndex < 0 {
+			log.Fatal("Invalid parameter syntax, missing '}'")
+		}
+		for _, s := range strings.Split(handlerParams[1:ebIndex], ",") {
+			kv := strings.SplitN(s, "=", 2)
+			connectParams[kv[0]] = kv[1]
+		}
+		handlerParams = handlerParams[ebIndex+1:]
+	}
+	return connectParams, handlerParams
+}
+
 func main() {
 	var (
 		listenAddr    = flag.String("listen", ":80", "Listen ip:port")
@@ -926,10 +942,16 @@ func main() {
 			}
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket", "ws":
+			connectParams, handlerParams := parseCurlyParams(handlerParams)
 			http.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
 				defer logf(r, logLevelVerbose, "WS<->Sock handler finished")
 				var respHeader http.Header
+				wsMessageType := websocket.BinaryMessage
+				if msgType, ok := connectParams["type"]; ok && msgType == "text" {
+					wsMessageType = websocket.TextMessage
+				}
 				if subproto := r.Header.Get("Sec-Websocket-Protocol"); subproto != "" {
+					logf(r, logLevelInfo, "Sec-Websocket-Protocol: %#v", subproto)
 					respHeader = http.Header{"Sec-Websocket-Protocol": {subproto}}
 				}
 				c, err := upgrader.Upgrade(w, r, respHeader)
@@ -982,7 +1004,7 @@ func main() {
 							if data == nil {
 								break
 							}
-							if err := c.WriteMessage(websocket.BinaryMessage, data); err != nil {
+							if err := c.WriteMessage(wsMessageType, data); err != nil {
 								logf(r, logLevelError, "Error writing to WS: %s", err)
 								break
 							}
@@ -1070,8 +1092,8 @@ func main() {
 							}
 							break
 						}
-						if msgType != websocket.BinaryMessage {
-							logf(r, logLevelWarning, "Not a binary message: %#v", msgType)
+						if msgType != wsMessageType {
+							logf(r, logLevelWarning, "Not message type does not match: %#v != ", msgType, wsMessageType)
 						}
 						dataFromWS <- data
 					}
