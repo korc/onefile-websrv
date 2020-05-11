@@ -168,6 +168,18 @@ func (c LoggedConnection) Close() error {
 	return c.Conn.Close()
 }
 
+type LoggedTlsConnection struct {
+	tls.Conn
+	remoteLogger *RemoteLogger
+}
+
+func (c *LoggedTlsConnection) Close() error {
+	c.remoteLogger.log("connection-close", struct {
+		RemoteAddr string
+	}{c.RemoteAddr().String()})
+	return c.Conn.Close()
+}
+
 type tlsInfoLogMessage struct {
 	Version          uint16
 	DidResume        bool
@@ -192,11 +204,10 @@ func (l LoggedListener) Accept() (net.Conn, error) {
 				tlsInfo.(*tlsInfoLogMessage).PeerCertificates = append(tlsInfo.(*tlsInfoLogMessage).PeerCertificates, v.Raw)
 			}
 		}
-		//tlsInfo = struct {
-		//	TLSVersion    uint16
-		//	ServerName string
-		//	Certs      []*x509.Certificate
-		//}{cstate.Version, cstate.ServerName, cstate.PeerCertificates}
+		// TBD: implement logging of closing TLS connections
+	} else {
+		// TBD: possible failure of conn.(*someType) sometime later..
+		conn = LoggedConnection{conn, l.remoteLogger}
 	}
 	if err := l.remoteLogger.log("connection-accept", struct {
 		RemoteAddr string
@@ -205,7 +216,7 @@ func (l LoggedListener) Accept() (net.Conn, error) {
 	}{conn.RemoteAddr().String(), conn.LocalAddr().String(), tlsInfo}); err != nil {
 		logf(nil, logLevelError, "Cannot send accept info: %s", err)
 	}
-	return LoggedConnection{conn, l.remoteLogger}, err
+	return conn, err
 }
 
 var oidMap = map[string]string{
