@@ -111,6 +111,9 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
       - `HOST:PORT` to connection via TCP to _HOST:PORT_
       - `tls:HOST:PORT` to connect using TLS over TCP
       - `unix:/PATH/SOCKET` for UNIX socket
+      - `exec:COMMAND` to run COMMAND using `sh -c`
+        - prefix `{sh=SHELL}` for alternate shell
+        - prefix `{no-c=1}` for no `-c` option after shell command
   - `http`
     - pass-thru proxy
     - `params` is a full URL of backend web server
