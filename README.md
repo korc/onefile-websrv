@@ -75,7 +75,7 @@ websrv -h
   -loglevel string
       Max log level (one of FATAL, ERROR, WARNING, INFO, VERBOSE, DEBUG) (default "info")
   -map value
-      <path>=<handler>:[<params>] (multi-arg, default '/=file:')
+      [<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')
   -user string
       Switch to user (NOT RECOMMENDED)
   -wdctype string
@@ -95,6 +95,7 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 - `-map` option can be used to map URL's to different handlers
 - multiple arguments on command-line will add more mappings
 - each mapping has relative URL `path` and `handler` part, with optional `parameters` for each handler type
+  - optionally prefix `path` with a host name for "virtual hosts"
 - `handler` parameter values:
   - `file`
     - simple file-based static webserver

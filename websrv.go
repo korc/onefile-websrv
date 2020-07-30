@@ -875,8 +875,8 @@ func main() {
 	)
 	var authFlag, aclFlag, urlMaps, corsMaps arrayFlag
 	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
-	flag.Var(&aclFlag, "acl", "<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
-	flag.Var(&urlMaps, "map", "<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
+	flag.Var(&aclFlag, "acl", "[{<methods..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
+	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -1007,6 +1007,10 @@ func main() {
 			logf(nil, logLevelFatal, "Url map %#v does not contain '='", urlMap)
 		}
 		urlPath := urlMap[:pathSepIdx]
+		if !strings.Contains(urlPath, "/") {
+			logf(nil, logLevelFatal, "URL path does not contain '/' (format: [<vhost>]/[<subpath>])")
+		}
+		urlPathNoHost := urlPath[strings.Index(urlPath, "/"):]
 		urlHandler := urlMap[pathSepIdx+1:]
 		handlerTypeIdx := strings.Index(urlHandler, ":")
 		if handlerTypeIdx == -1 {
@@ -1018,7 +1022,7 @@ func main() {
 		case "debug":
 			http.HandleFunc(urlPath, DebugRequest)
 		case "file":
-			http.Handle(urlPath, http.StripPrefix(urlPath, http.FileServer(http.Dir(handlerParams))))
+			http.Handle(urlPath, http.StripPrefix(urlPathNoHost, http.FileServer(http.Dir(handlerParams))))
 		case "webdav":
 			if !strings.HasSuffix(urlPath, "/") {
 				urlPath += "/"
@@ -1032,7 +1036,7 @@ func main() {
 			wdHandler := webdav.Handler{
 				FileSystem: wdFS,
 				LockSystem: webdav.NewMemLS(),
-				Prefix:     urlPath,
+				Prefix:     urlPathNoHost,
 			}
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket", "ws":
@@ -1254,7 +1258,7 @@ func main() {
 					},
 				}
 			}
-			http.Handle(urlPath, http.StripPrefix(urlPath, prxHandler))
+			http.Handle(urlPath, http.StripPrefix(urlPathNoHost, prxHandler))
 		case "cgi":
 			var env, inhEnv, args []string
 			if strings.HasPrefix(handlerParams, "{") {
@@ -1282,7 +1286,7 @@ func main() {
 				}
 				handlerParams = handlerParams[ebIndex+1:]
 			}
-			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPath, "/"), Env: env, InheritEnv: inhEnv, Args: args})
+			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPathNoHost, "/"), Env: env, InheritEnv: inhEnv, Args: args})
 		default:
 			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http cgi", urlHandler[:handlerTypeIdx])
 		}
