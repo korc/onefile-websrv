@@ -5,6 +5,7 @@ import (
 	"flag"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,11 +15,45 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+func connectAndLoop(origin string, wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) {
+	log.Printf("Dialing to %s, origin = %s", wsConfig.Location, origin)
+	ws, err := websocket.DialConfig(wsConfig)
+	if err != nil {
+		panic(err)
+	}
+	defer ws.Close()
+	ws.PayloadType = websocket.BinaryFrame
+
+	log.Printf("Connected, transferring data")
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		defer ws.Close()
+		defer src.Close()
+		defer dst.Close()
+		defer log.Printf("local closed the socket")
+		io.Copy(ws, src)
+	}()
+	go func() {
+		defer wg.Done()
+		defer ws.Close()
+		defer dst.Close()
+		defer src.Close()
+		defer log.Printf("remote closed the socket")
+		io.Copy(dst, ws)
+	}()
+	wg.Wait()
+	log.Printf("finished")
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	originFlag := flag.String("origin", "http://localhost", "websocket origin")
 	certFlag := flag.String("cert", "", "Certificate for SSL connection")
 	certKeyFlag := flag.String("key", "", "Key for SSL certificate")
+	listenAddr := flag.String("listen", "", "Listen on address instead of stdin/out")
 	flag.Parse()
 
 	args := flag.Args()
@@ -56,35 +91,25 @@ func main() {
 			wsConfig.Header.Add(kv[0], kv[1])
 		}
 	}
-
-	log.Printf("Dialing to %s, origin = %s", url, *originFlag)
-	ws, err := websocket.DialConfig(wsConfig)
-	if err != nil {
-		panic(err)
+	if *listenAddr == "" {
+		connectAndLoop(*originFlag, wsConfig, os.Stdout, os.Stderr)
+	} else {
+		proto := "tcp"
+		if idx := strings.Index(*listenAddr, "://"); idx >= 0 {
+			proto = (*listenAddr)[:idx]
+			*listenAddr = (*listenAddr)[idx+3:]
+		}
+		log.Printf("Listening on %s address %#v", proto, *listenAddr)
+		ls, err := net.Listen(proto, *listenAddr)
+		if err != nil {
+			log.Fatalf("Could not listen on %#v: %s", *listenAddr, err)
+		}
+		for {
+			conn, err := ls.Accept()
+			if err != nil {
+				log.Fatal("Error accepting client: ", err)
+			}
+			go connectAndLoop(*originFlag, wsConfig, conn, conn)
+		}
 	}
-	defer ws.Close()
-	ws.PayloadType = websocket.BinaryFrame
-
-	log.Printf("Connected, transferring data")
-
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		defer ws.Close()
-		defer os.Stdin.Close()
-		defer os.Stdout.Close()
-		defer log.Printf("local closed the socket")
-		io.Copy(ws, os.Stdin)
-	}()
-	go func() {
-		defer wg.Done()
-		defer ws.Close()
-		defer os.Stdout.Close()
-		defer os.Stdin.Close()
-		defer log.Printf("remote closed the socket")
-		io.Copy(os.Stdout, ws)
-	}()
-	wg.Wait()
-	log.Printf("finished")
 }
