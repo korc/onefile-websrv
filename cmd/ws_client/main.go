@@ -15,10 +15,10 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-func connectAndLoop(origin string, wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) error {
+func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) error {
 	defer dst.Close()
 	defer src.Close()
-	log.Printf("Dialing to %s, origin = %s", wsConfig.Location, origin)
+	log.Printf("Dialing to %s", wsConfig.Location)
 	ws, err := websocket.DialConfig(wsConfig)
 	if err != nil {
 		log.Print("Could not connect: ", err)
@@ -96,7 +96,7 @@ func main() {
 		}
 	}
 	if *listenAddr == "" {
-		connectAndLoop(*originFlag, wsConfig, os.Stdout, os.Stderr)
+		connectAndLoop(wsConfig, os.Stdout, os.Stderr)
 	} else {
 		proto := "tcp"
 		if idx := strings.Index(*listenAddr, "://"); idx >= 0 {
@@ -113,7 +113,7 @@ func main() {
 			if err != nil {
 				log.Fatal("Error accepting client: ", err)
 			}
-			go connectAndLoop(*originFlag, wsConfig, conn, conn)
+			go connectAndLoop(wsConfig, conn, conn)
 		}
 	}
 }
