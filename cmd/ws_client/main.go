@@ -88,7 +88,7 @@ func main() {
 		}
 	}
 
-	if len(args) > 2 {
+	if len(args) > 1 {
 		wsConfig.Header = http.Header{}
 		for i := 1; i < len(args); i++ {
 			kv := strings.SplitN(args[i], "=", 2)
