@@ -15,11 +15,14 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-func connectAndLoop(origin string, wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) {
+func connectAndLoop(origin string, wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) error {
+	defer dst.Close()
+	defer src.Close()
 	log.Printf("Dialing to %s, origin = %s", wsConfig.Location, origin)
 	ws, err := websocket.DialConfig(wsConfig)
 	if err != nil {
-		panic(err)
+		log.Print("Could not connect: ", err)
+		return err
 	}
 	defer ws.Close()
 	ws.PayloadType = websocket.BinaryFrame
@@ -46,6 +49,7 @@ func connectAndLoop(origin string, wsConfig *websocket.Config, dst io.WriteClose
 	}()
 	wg.Wait()
 	log.Printf("finished")
+	return nil
 }
 
 func main() {
