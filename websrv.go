@@ -870,6 +870,7 @@ func main() {
 		wsReadTimeout = flag.Int("wstmout", 60, "Websocket alive check timer in seconds")
 		loglevelFlag  = flag.String("loglevel", "info", "Max log level (one of "+strings.Join(logLevelStr, ", ")+")")
 		reqlog        = flag.String("reqlog", "", "URL to log request details to")
+		tls12Max      = flag.Bool("tls12max", false, "Use TLS1.2 as maximum supported version")
 		acmeHosts     = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 	)
@@ -970,6 +971,9 @@ func main() {
 			if *acmeHTTP != "" {
 				go http.ListenAndServe(*acmeHTTP, acmeManager.HTTPHandler(nil))
 			}
+		}
+		if *tls12Max {
+			tlsConfig.MaxVersion = tls.VersionTLS12
 		}
 		if haveCertAuth {
 			tlsConfig.ClientAuth = tls.RequestClientCert
