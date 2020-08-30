@@ -116,10 +116,12 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
         - prefix `{sh=SHELL}` for alternate shell
         - prefix `{no-c=1}` for no `-c` option after shell command
   - `http`
-    - pass-thru proxy
+    - pass-thru proxy, full URL starting with `http:` or `https:`
     - `params` is a full URL of backend web server
     - `params` can be prefixed with comma-separated connection options between `{` and `}`
-      - `cert` and `key` options to set TLS client cert/key files
+      - `cert` and `key` options to specify `https`-type backend client's cert/key files 
+      - `fp-hdr`, `cn-hdr`, `subj-hdr` and `cert-hdr` options forward client-sent certificate SHA256 fingerprint,
+       subject's CN attribute, subject's DN string or hex-encoded certificate to backend in specified HTTP header
   - `debug`
     - client request debugging
     - shows also client certificate hash, which can be used for `-auth` option's `Cert` method
@@ -133,8 +135,10 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 ### Access control
 
 - `-acl` option will define mapping between URL paths and required roles
-  - path is defined by regular expression
-  - you can specify HTTP methods (GET, POST etc) separated with commas in curly braces before path regexp
+  - path is defined by regular expression, like `^/admin/`
+  - in curly braces before path regexp can set comma-separated params
+    - `host:<hostname>` to apply only for particular virtual hosts (req with `Host: hostname`)
+    - `GET`, `POST`, etc. to filter by HTTP methods 
   - `:` separates alternate roles (OR operation)
   - `+` makes all specified roles to be required (AND operation)
     - can be used to implement multi-factor auth

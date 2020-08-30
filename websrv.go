@@ -7,7 +7,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"flag"
 	"io"
 	"log"
@@ -434,18 +436,7 @@ func main() {
 				<-done
 			})
 		case "http":
-			connectParams := make(map[string]string)
-			if strings.HasPrefix(handlerParams, "{") {
-				ebIndex := strings.Index(handlerParams, "}")
-				if ebIndex < 0 {
-					log.Fatal("Cannot find parameters before URL")
-				}
-				for _, s := range strings.Split(handlerParams[1:ebIndex], ",") {
-					kv := strings.SplitN(s, "=", 2)
-					connectParams[kv[0]] = kv[1]
-				}
-				handlerParams = handlerParams[ebIndex+1:]
-			}
+			connectParams, handlerParams := parseCurlyParams(handlerParams)
 			httpURL, err := url.Parse(handlerParams)
 			if err != nil {
 				logf(nil, logLevelFatal, "Cannot parse %#v as URL: %v", handlerParams, err)
@@ -455,8 +446,38 @@ func main() {
 			defaultDirector := prxHandler.Director
 			prxHandler.Director = func(request *http.Request) {
 				defaultDirector(request)
+				for _, hdr := range []string{"fp-hdr", "cn-hdr", "cert-hdr", "subj-hdr"} {
+					if hdrName, ok := connectParams[hdr]; ok {
+						// Scrub possible auth-related headers from request
+						request.Header.Del(hdrName)
+					}
+				}
 				if *certFile != "" {
 					request.Header.Set("X-Forwarded-Proto", "https")
+					if request.TLS != nil {
+						if fpHeader, ok := connectParams["fp-hdr"]; ok {
+							for _, crt := range request.TLS.PeerCertificates {
+								h := sha256.New()
+								h.Write(crt.Raw)
+								request.Header.Add(fpHeader, hex.EncodeToString(h.Sum(nil)))
+							}
+						}
+						if subjHeader, ok := connectParams["subj-hdr"]; ok {
+							for _, crt := range request.TLS.PeerCertificates {
+								request.Header.Add(subjHeader, crt.Subject.String())
+							}
+						}
+						if cnHeader, ok := connectParams["cn-hdr"]; ok {
+							for _, crt := range request.TLS.PeerCertificates {
+								request.Header.Add(cnHeader, crt.Subject.CommonName)
+							}
+						}
+						if crtHdr, ok := connectParams["cert-hdr"]; ok {
+							for _, crt := range request.TLS.PeerCertificates {
+								request.Header.Add(crtHdr, hex.EncodeToString(crt.Raw))
+							}
+						}
+					}
 				} else {
 					request.Header.Set("X-Forwarded-Proto", "http")
 				}
