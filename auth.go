@@ -33,6 +33,7 @@ type ACLRecord struct {
 	Expr     *regexp.Regexp
 	Roles    map[string]bool
 	Methods  map[string]bool
+	Hosts    map[string]bool
 	MatchURI bool
 }
 
@@ -87,6 +88,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 // AddACL : add roles constraint to matching path regexp
 func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	var methods map[string]bool
+	var hosts map[string]bool
 	matchURI := false
 	if strings.HasPrefix(reExpr, "?") {
 		matchURI = true
@@ -94,9 +96,18 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	}
 	if strings.HasPrefix(reExpr, "{") {
 		clidx := strings.Index(reExpr, "}")
-		methods = make(map[string]bool)
 		for _, v := range strings.Split(reExpr[1:clidx], ",") {
-			methods[v] = true
+			if strings.HasPrefix(v, "host:") {
+				if hosts == nil {
+					hosts = make(map[string]bool)
+				}
+				hosts[v[5:]] = true
+			} else {
+				if methods == nil {
+					methods = make(map[string]bool)
+				}
+				methods[v] = true
+			}
 		}
 		reExpr = reExpr[clidx+1:]
 	}
@@ -107,7 +118,7 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	if ah.ACLs == nil {
 		ah.ACLs = make([]ACLRecord, 0)
 	}
-	rec := ACLRecord{re, make(map[string]bool), methods, matchURI}
+	rec := ACLRecord{re, make(map[string]bool), methods, hosts, matchURI}
 	for _, r := range roles {
 		rec.Roles[r] = true
 	}
@@ -123,16 +134,22 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	neededRoles := make(map[string]bool)
 	for _, acl := range ah.ACLs {
 		methodMatch := true
+		hostMatch := true
 		if acl.Methods != nil {
 			if _, ok := acl.Methods[r.Method]; !ok {
 				methodMatch = false
+			}
+		}
+		if acl.Hosts != nil {
+			if _, ok := acl.Hosts[r.Host]; !ok {
+				hostMatch = false
 			}
 		}
 		testString := r.URL.Path
 		if acl.MatchURI {
 			testString = r.RequestURI
 		}
-		if methodMatch && acl.Expr.MatchString(testString) {
+		if methodMatch && hostMatch && acl.Expr.MatchString(testString) {
 			neededRoles = acl.Roles
 			break
 		}

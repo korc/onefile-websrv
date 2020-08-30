@@ -91,7 +91,7 @@ func main() {
 	)
 	var authFlag, aclFlag, urlMaps, corsMaps arrayFlag
 	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
-	flag.Var(&aclFlag, "acl", "[{<methods..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
+	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
 
