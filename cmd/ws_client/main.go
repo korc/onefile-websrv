@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+//goland:noinspection GoUnhandledErrorResult
 func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) error {
 	defer dst.Close()
 	defer src.Close()
@@ -96,7 +97,7 @@ func main() {
 		}
 	}
 	if *listenAddr == "" {
-		connectAndLoop(wsConfig, os.Stdout, os.Stderr)
+		connectAndLoop(wsConfig, os.Stdout, os.Stdin)
 	} else {
 		proto := "tcp"
 		if idx := strings.Index(*listenAddr, "://"); idx >= 0 {
