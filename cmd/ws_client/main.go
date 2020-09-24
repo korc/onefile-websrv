@@ -59,6 +59,7 @@ func main() {
 	certFlag := flag.String("cert", "", "Certificate for SSL connection")
 	certKeyFlag := flag.String("key", "", "Key for SSL certificate")
 	listenAddr := flag.String("listen", "", "Listen on address instead of stdin/out")
+	connectAddr := flag.String("connect", "", "Connect to address instead of stdin/out")
 	flag.Parse()
 
 	args := flag.Args()
@@ -96,9 +97,9 @@ func main() {
 			wsConfig.Header.Add(kv[0], kv[1])
 		}
 	}
-	if *listenAddr == "" {
+	if *listenAddr == "" && *connectAddr == "" {
 		connectAndLoop(wsConfig, os.Stdout, os.Stdin)
-	} else {
+	} else if *connectAddr == "" {
 		proto := "tcp"
 		if idx := strings.Index(*listenAddr, "://"); idx >= 0 {
 			proto = (*listenAddr)[:idx]
@@ -116,5 +117,19 @@ func main() {
 			}
 			go connectAndLoop(wsConfig, conn, conn)
 		}
+	} else {
+		proto := "tcp"
+		if idx := strings.Index(*connectAddr, "://"); idx >= 0 {
+			proto = (*connectAddr)[:idx]
+			*connectAddr = (*connectAddr)[idx+3:]
+		}
+		log.Printf("Connecting to %s address %#v", proto, *connectAddr)
+		conn, err := net.Dial(proto, *connectAddr)
+		if err != nil {
+			log.Fatalf("Could not connect to %#v: %s", *connectAddr, err)
+		} else {
+			log.Print("Connected")
+		}
+		connectAndLoop(wsConfig, conn, conn)
 	}
 }
