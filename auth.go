@@ -295,7 +295,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 			h.Write(crt.Raw)
 			peerHash := hex.EncodeToString(h.Sum(nil))
 			if lastPeerCert != nil {
-				if err := crt.CheckSignatureFrom(lastPeerCert); err != nil {
+				if err := lastPeerCert.CheckSignatureFrom(crt); err != nil {
 					logf(r, logLevelWarning, "Client certificate chain broken at %d'th cert[%s]: %s", i, peerHash, err)
 					break
 				}
