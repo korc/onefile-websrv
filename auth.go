@@ -289,10 +289,18 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	}
 
 	if r.TLS != nil {
-		for _, crt := range r.TLS.PeerCertificates {
+		var lastPeerCert *x509.Certificate
+		for i, crt := range r.TLS.PeerCertificates {
 			h := sha256.New()
 			h.Write(crt.Raw)
 			peerHash := hex.EncodeToString(h.Sum(nil))
+			if lastPeerCert != nil {
+				if err := crt.CheckSignatureFrom(lastPeerCert); err != nil {
+					logf(r, logLevelWarning, "Client certificate chain broken at %d'th cert[%s]: %s", i, peerHash, err)
+					break
+				}
+			}
+			lastPeerCert = crt
 			if authCerts, ok := ah.Auths["Cert"]; ok {
 				if gotRoles, ok := authCerts[peerHash]; ok {
 					for _, role := range strings.Split(gotRoles, "+") {
