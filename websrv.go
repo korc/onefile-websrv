@@ -7,9 +7,11 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -20,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"os/user"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,6 +77,8 @@ func parseCurlyParams(handlerParams string) (map[string]string, string) {
 	}
 	return connectParams, handlerParams
 }
+
+var ErrBadHostname = errors.New("Host name does match allowed pattern")
 
 func main() {
 	var (
@@ -179,10 +184,25 @@ func main() {
 			}
 			tlsConfig = &tls.Config{Certificates: []tls.Certificate{crt}}
 		} else {
+			var hostnamePolicy autocert.HostPolicy
+			if (*acmeHosts)[:1] == "^" {
+				hostNameRe, err := regexp.Compile(*acmeHosts)
+				if err != nil {
+					log.Fatalf("Cannot compile acme hosts name %#v as regular expression: %s", *acmeHosts, err)
+				}
+				hostnamePolicy = func(_ context.Context, host string) error {
+					if !hostNameRe.MatchString(host) {
+						return ErrBadHostname
+					}
+					return nil
+				}
+			} else {
+				hostnamePolicy = autocert.HostWhitelist(strings.Split(*acmeHosts, ",")...)
+			}
 			acmeManager := autocert.Manager{
 				Cache:      autocert.DirCache(*certFile),
 				Prompt:     autocert.AcceptTOS,
-				HostPolicy: autocert.HostWhitelist(strings.Split(*acmeHosts, ",")...),
+				HostPolicy: hostnamePolicy,
 			}
 			tlsConfig = &tls.Config{GetCertificate: acmeManager.GetCertificate}
 			if *acmeHTTP != "" {
