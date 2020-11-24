@@ -11,8 +11,8 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
-	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -77,8 +77,6 @@ func parseCurlyParams(handlerParams string) (map[string]string, string) {
 	}
 	return connectParams, handlerParams
 }
-
-var ErrBadHostname = errors.New("Host name does match allowed pattern")
 
 func main() {
 	var (
@@ -192,7 +190,7 @@ func main() {
 				}
 				hostnamePolicy = func(_ context.Context, host string) error {
 					if !hostNameRe.MatchString(host) {
-						return ErrBadHostname
+						return fmt.Errorf("Hostname %#v does not match pattern %#v", host, *acmeHosts)
 					}
 					return nil
 				}
