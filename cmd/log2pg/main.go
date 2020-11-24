@@ -13,6 +13,7 @@ import (
 
 type LogReceiver struct {
 	InsertStatement *sql.Stmt
+	AddURL          bool
 }
 
 func (lr LogReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -20,7 +21,11 @@ func (lr LogReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Could not read body")
 	} else {
 		var insertId int
-		if err := lr.InsertStatement.QueryRow(r.RemoteAddr, string(body)).Scan(&insertId); err != nil {
+		insertArgs := []interface{}{r.RemoteAddr, string(body)}
+		if lr.AddURL {
+			insertArgs = append(insertArgs, r.RequestURI)
+		}
+		if err := lr.InsertStatement.QueryRow(insertArgs...).Scan(&insertId); err != nil {
 			log.Printf("Error executing statement: %s", err)
 		} else {
 			log.Printf("Received log entry #%d from %s", insertId, r.RemoteAddr)
@@ -36,7 +41,8 @@ func main() {
 	listenFlag := flag.String("listen", "127.0.0.1:8003", "Listen for log messages on IP")
 	dsn := flag.String("dsn", "sslmode=disable", "Postgresql DSN")
 	dbTable := flag.String("table", "log", "Table in database receiving log")
-	tableCreateSql := flag.String("create", "CREATE TABLE \"%s\" (id BIGSERIAL PRIMARY KEY, stamp TIMESTAMPTZ DEFAULT now(), src text, msg JSONB)", "Table creation SQL")
+	addUrl := flag.Bool("add-url", true, "Add RequestURI to 'url' column if it exists")
+	tableCreateSql := flag.String("create", "CREATE TABLE \"%s\" (id BIGSERIAL PRIMARY KEY, stamp TIMESTAMPTZ DEFAULT now(), url text, src text, msg JSONB)", "Table creation SQL")
 	flag.Parse()
 
 	db, err := sql.Open("postgres", *dsn)
@@ -54,6 +60,14 @@ func main() {
 		}
 	}
 	insertTmpl := "INSERT INTO \"%s\" (src, msg) VALUES ($1, $2) RETURNING id"
+	haveUrl := false
+	if *addUrl {
+		if _, err := db.Exec(fmt.Sprintf("SELECT url FROM \"%s\" WHERE 1=0", *dbTable)); err == nil {
+			insertTmpl = "INSERT INTO \"%s\" (src, msg, url) VALUES ($1, $2, $3) RETURNING id"
+			haveUrl = true
+			log.Printf("Logging also RequestURI")
+		}
+	}
 	sqlInsert, err := db.Prepare(fmt.Sprintf(insertTmpl, *dbTable))
 	if err != nil {
 		log.Fatal("Cannot prepare query: ", err)
@@ -61,7 +75,7 @@ func main() {
 	defer sqlInsert.Close()
 
 	log.Printf("Listening on %s", *listenFlag)
-	if err := http.ListenAndServe(*listenFlag, LogReceiver{InsertStatement: sqlInsert}); err != nil {
+	if err := http.ListenAndServe(*listenFlag, LogReceiver{InsertStatement: sqlInsert, AddURL: haveUrl}); err != nil {
 		log.Fatalf("Could not start HTTP server: %s", err)
 	}
 }
