@@ -135,7 +135,8 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 ### Access control
 
 - `-acl` option will define mapping between URL paths and required roles
-  - path is defined by regular expression, like `^/admin/`
+  - `path_regexp` is defined by regular expression, like `^/admin/`
+    - add `?` before regex (ex: `?^/xyz/.*session_id=.*`) to check full RequestURI including query part (not only Path) for match
   - in curly braces before path regexp can set comma-separated params
     - `host:<hostname>` to apply only for particular virtual hosts (req with `Host: hostname`)
     - `GET`, `POST`, etc. to filter by HTTP methods 
