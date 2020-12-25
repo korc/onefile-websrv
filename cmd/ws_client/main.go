@@ -15,6 +15,8 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+var exitOnBadStatus = false
+
 //goland:noinspection GoUnhandledErrorResult
 func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) error {
 	defer dst.Close()
@@ -23,6 +25,9 @@ func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadC
 	ws, err := websocket.DialConfig(wsConfig)
 	if err != nil {
 		log.Print("Could not connect: ", err)
+		if dialErr, ok := err.(*websocket.DialError); ok && exitOnBadStatus && dialErr.Err == websocket.ErrBadStatus {
+			os.Exit(100)
+		}
 		return err
 	}
 	defer ws.Close()
@@ -60,6 +65,7 @@ func main() {
 	certKeyFlag := flag.String("key", "", "Key for SSL certificate")
 	listenAddr := flag.String("listen", "", "Listen on address instead of stdin/out")
 	connectAddr := flag.String("connect", "", "Connect to address instead of stdin/out")
+	exitOnBadStatusFlag := flag.Bool("exit-on-bad-status", false, "exit with 100 on bad status from WS")
 	flag.Parse()
 
 	args := flag.Args()
@@ -69,6 +75,7 @@ func main() {
 
 	url := args[0]
 
+	exitOnBadStatus = *exitOnBadStatusFlag
 	wsConfig, err := websocket.NewConfig(url, *originFlag)
 	if err != nil {
 		panic(err)
