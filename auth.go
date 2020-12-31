@@ -22,12 +22,6 @@ import (
 	"github.com/dgrijalva/jwt-go"
 )
 
-type contextKey int
-
-const (
-	authRoleContext contextKey = iota
-)
-
 // ACLRecord maps path regexp to required roles
 type ACLRecord struct {
 	Expr     *regexp.Regexp
@@ -349,10 +343,17 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		findRoleCount := len(reqRoles)
 		for _, reqRole := range reqRoles {
 			if _, ok := haveRoles[reqRole]; ok {
+				haveRoles[reqRole] = true
 				findRoleCount--
 			}
 		}
 		if findRoleCount == 0 {
+			if rl := r.Context().Value(remoteLoggerContext); rl != nil {
+				_ = rl.(*RemoteLogger).log("auth-ok", map[string]interface{}{
+					"RequestNum": r.Context().Value("request-num"),
+					"Roles":      haveRoles,
+				})
+			}
 			return retReq, nil
 		}
 	}

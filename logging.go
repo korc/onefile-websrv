@@ -107,6 +107,8 @@ func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	newReq := r.WithContext(ctx)
 	requestLogged := false
 	if hl.remoteLogger != nil {
+		ctx = context.WithValue(ctx, remoteLoggerContext, hl.remoteLogger)
+		newReq = newReq.WithContext(ctx)
 		if err := hl.remoteLogger.log("request-start", struct {
 			RequestNum uint64
 			RemoteAddr string

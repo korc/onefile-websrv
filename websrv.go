@@ -35,6 +35,13 @@ import (
 	"golang.org/x/net/webdav"
 )
 
+type contextKey int
+
+const (
+	authRoleContext contextKey = iota
+	remoteLoggerContext
+)
+
 // ConnWithDeadline is like net.Conn, but with deadline to read or write data
 type ConnWithDeadline struct {
 	Conn     net.Conn
