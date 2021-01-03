@@ -339,6 +339,15 @@ func main() {
 						logf(r, logLevelError, "Connect to %#v failed: %s", handlerParams, err)
 						return
 					}
+					if rl := r.Context().Value(remoteLoggerContext); rl != nil {
+						rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
+							"RequestNum": r.Context().Value("request-num"),
+							"LocalAddr": conn.LocalAddr().String(),
+							"RemoteAddr": conn.RemoteAddr().String(),
+							"Protocol": proto,
+						})
+						log.Printf("remote logger: %#v", rl)
+					}
 				}
 				defer conn.Close()
 
