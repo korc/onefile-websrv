@@ -55,6 +55,8 @@ func main() {
 				log.Fatalf("Creating table %#v failed: %s\n", *dbTable, err)
 			}
 			log.Printf("Created table %#v in database", *dbTable)
+		} else if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "42501" {
+			log.Printf("Skipping table schema check, no permission to SELECT from %#v: %s", *dbTable, err)
 		} else {
 			log.Fatalf("Could not access table %#v: %s\n", *dbTable, err)
 		}
