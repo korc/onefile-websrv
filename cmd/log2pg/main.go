@@ -49,6 +49,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Cannot connect to database %#v: %s", *dsn, err)
 	}
+	returnValue := "id"
 	if _, err := db.Exec(fmt.Sprintf("SELECT 1 FROM \"%s\" WHERE 1=0 AND src IS NOT NULL and msg IS NOT NULL", *dbTable)); err != nil {
 		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "42P01" {
 			if _, err := db.Exec(fmt.Sprintf(*tableCreateSql, *dbTable)); err != nil {
@@ -57,15 +58,16 @@ func main() {
 			log.Printf("Created table %#v in database", *dbTable)
 		} else if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "42501" {
 			log.Printf("Skipping table schema check, no permission to SELECT from %#v: %s", *dbTable, err)
+			returnValue = "-1"
 		} else {
 			log.Fatalf("Could not access table %#v: %s\n", *dbTable, err)
 		}
 	}
-	insertTmpl := "INSERT INTO \"%s\" (src, msg) VALUES ($1, $2) RETURNING id"
+	insertTmpl := "INSERT INTO \"%s\" (src, msg) VALUES ($1, $2) RETURNING " + returnValue
 	haveUrl := false
 	if *addUrl {
 		if _, err := db.Exec(fmt.Sprintf("SELECT url FROM \"%s\" WHERE 1=0", *dbTable)); err == nil {
-			insertTmpl = "INSERT INTO \"%s\" (src, msg, url) VALUES ($1, $2, $3) RETURNING id"
+			insertTmpl = "INSERT INTO \"%s\" (src, msg, url) VALUES ($1, $2, $3) RETURNING " + returnValue
 			haveUrl = true
 			log.Printf("Logging also RequestURI")
 		}
