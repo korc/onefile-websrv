@@ -66,6 +66,8 @@ websrv -h
       [<role>[+<role2>]=]<method>:<auth> (multi-arg)
   -cert string
       SSL certificate file or autocert cache dir
+  -cert-fallback
+      Certificate file to use if ACME fails
   -chroot string
       chroot() to directory after start
   -key string

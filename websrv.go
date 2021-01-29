@@ -91,6 +91,7 @@ func main() {
 		chroot        = flag.String("chroot", "", "chroot() to directory after start")
 		userName      = flag.String("user", "", "Switch to user (NOT RECOMMENDED)")
 		certFile      = flag.String("cert", "", "SSL certificate file or autocert cache dir")
+		certFileFb    = flag.String("cert-fallback", "", "Certificate file to use if ACME fails")
 		keyFile       = flag.String("key", "", "SSL key file")
 		wdCType       = flag.String("wdctype", "", "Fix content-type for Webdav GET/POST requests")
 		acmeHTTP      = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
@@ -178,11 +179,11 @@ func main() {
 	}
 	logf(nil, logLevelInfo, "Listening on %s", *listenAddr)
 	if *certFile != "" {
-		if *keyFile == "" {
-			*keyFile = *certFile
-		}
 		var tlsConfig *tls.Config
 		if *acmeHosts == "" {
+			if *keyFile == "" {
+				*keyFile = *certFile
+			}
 			crt, err := tls.LoadX509KeyPair(*certFile, *keyFile)
 			if err != nil {
 				logf(nil, logLevelFatal, "Loading X509 cert from %#v and %#v failed: %s", *certFile, *keyFile, err)
@@ -209,7 +210,27 @@ func main() {
 				Prompt:     autocert.AcceptTOS,
 				HostPolicy: hostnamePolicy,
 			}
-			tlsConfig = &tls.Config{GetCertificate: acmeManager.GetCertificate}
+			getCert := acmeManager.GetCertificate
+			if *certFileFb != "" {
+				if *keyFile == "" {
+					*keyFile = *certFileFb
+				}
+				crt, err := tls.LoadX509KeyPair(*certFileFb, *keyFile)
+				if err != nil {
+					logf(nil, logLevelFatal, "Loading X509 cert from %#v and %#v failed: %s",
+						*certFileFb, *keyFile, err)
+				}
+				getCert = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+					if autoCert, err := acmeManager.GetCertificate(hello); err != nil {
+						logf(nil, logLevelInfo, "using fallback, %#v autocert failed: %s",
+							hello.ServerName, err)
+						return &crt, nil
+					} else {
+						return autoCert, nil
+					}
+				}
+			}
+			tlsConfig = &tls.Config{GetCertificate: getCert}
 			if *acmeHTTP != "" {
 				go http.ListenAndServe(*acmeHTTP, acmeManager.HTTPHandler(nil))
 			}
