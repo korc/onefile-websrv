@@ -173,7 +173,12 @@ func main() {
 		}
 	}
 
-	ln, err := net.Listen("tcp", *listenAddr)
+	listenProto := "tcp"
+	if (*listenAddr)[:1] == "/" || (*listenAddr)[:1] == "@" || (*listenAddr)[:2] == "./" {
+		listenProto = "unix"
+	}
+
+	ln, err := net.Listen(listenProto, *listenAddr)
 	if err != nil {
 		logf(nil, logLevelFatal, "Listen on %#v failed: %s", *listenAddr, err)
 	}
