@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -85,9 +86,34 @@ func parseCurlyParams(handlerParams string) (map[string]string, string) {
 	return connectParams, handlerParams
 }
 
+type UnixRoundTripper struct {
+}
+
+func (u UnixRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	request.URL.Scheme = "http"
+
+	sepIdx := strings.Index(request.URL.Path, ":")
+	if sepIdx < 0 {
+		logf(request, logLevelError, "Unix endpoint %#v does not contain ':'", request.URL.Path)
+		return nil, errors.New("server configuration error")
+	}
+	unixPath := request.URL.Path[:sepIdx]
+	request.URL.Path = request.URL.Path[sepIdx+1:]
+
+	if request.URL.Host == "" {
+		request.URL.Host = "localhost"
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	return (&http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", unixPath)
+		},
+	}).RoundTrip(request)
+}
+
 func main() {
 	var (
-		listenAddr    = flag.String("listen", ":80", "Listen ip:port")
+		listenAddr    = flag.String("listen", ":80", "Listen ip:port or /path/to/unix-socket")
 		chroot        = flag.String("chroot", "", "chroot() to directory after start")
 		userName      = flag.String("user", "", "Switch to user (NOT RECOMMENDED)")
 		certFile      = flag.String("cert", "", "SSL certificate file or autocert cache dir")
@@ -97,7 +123,7 @@ func main() {
 		acmeHTTP      = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
 		wsReadTimeout = flag.Int("wstmout", 60, "Websocket alive check timer in seconds")
 		loglevelFlag  = flag.String("loglevel", "info", "Max log level (one of "+strings.Join(logLevelStr, ", ")+")")
-		reqlog        = flag.String("reqlog", "", "URL to log request details to")
+		reqlog        = flag.String("reqlog", "", "URL to log request details to (supports also unix:///dir/unix-socket:/path URLs)")
 		tls12Max      = flag.Bool("tls12max", false, "Use TLS1.2 as maximum supported version")
 		acmeHosts     = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
@@ -176,6 +202,9 @@ func main() {
 	listenProto := "tcp"
 	if (*listenAddr)[:1] == "/" || (*listenAddr)[:1] == "@" || (*listenAddr)[:2] == "./" {
 		listenProto = "unix"
+		if (*listenAddr)[:1] != "@" {
+			_ = os.Remove(*listenAddr)
+		}
 	}
 
 	ln, err := net.Listen(listenProto, *listenAddr)
@@ -368,9 +397,9 @@ func main() {
 					if rl := r.Context().Value(remoteLoggerContext); rl != nil {
 						rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
 							"RequestNum": r.Context().Value("request-num"),
-							"LocalAddr": conn.LocalAddr().String(),
+							"LocalAddr":  conn.LocalAddr().String(),
 							"RemoteAddr": conn.RemoteAddr().String(),
-							"Protocol": proto,
+							"Protocol":   proto,
 						})
 						log.Printf("remote logger: %#v", rl)
 					}
@@ -558,6 +587,10 @@ func main() {
 					},
 				}
 			}
+			if prxHandler.Transport == nil {
+				prxHandler.Transport = http.DefaultTransport.(*http.Transport).Clone()
+			}
+			prxHandler.Transport.(*http.Transport).RegisterProtocol("unix", &UnixRoundTripper{})
 			http.Handle(urlPath, http.StripPrefix(urlPathNoHost, prxHandler))
 		case "cgi":
 			var env, inhEnv, args []string
@@ -595,7 +628,9 @@ func main() {
 	var rl *RemoteLogger
 
 	if *reqlog != "" {
-		rl = &RemoteLogger{*reqlog}
+		logTransport := http.DefaultTransport.(*http.Transport).Clone()
+		logTransport.RegisterProtocol("unix", &UnixRoundTripper{})
+		rl = &RemoteLogger{*reqlog, &http.Client{Transport: logTransport}}
 		ln = LoggedListener{ln, rl}
 		rl.log("server-start", struct {
 			ListenAddress string

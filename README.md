@@ -73,7 +73,7 @@ websrv -h
   -key string
       SSL key file
   -listen string
-      Listen ip:port (default ":80")
+      Listen ip:port or /path/to/unix-socket (default ":80")
   -loglevel string
       Max log level (one of FATAL, ERROR, WARNING, INFO, VERBOSE, DEBUG) (default "info")
   -map value
@@ -87,7 +87,7 @@ websrv -h
   -wstmout int
       Websocket alive check timer in seconds (default 60)
   -reqlog string
-      URL to log request details to
+      URL to log request details to (supports also unix:///dir/unix-socket:/path URLs)
 ```
 
 Options marked with `multi-arg` can be specified multiple times on commandline, and will add to previous configuration. Other options are meant to be set only once.
@@ -118,8 +118,9 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
         - prefix `{sh=SHELL}` for alternate shell
         - prefix `{no-c=1}` for no `-c` option after shell command
   - `http`
-    - pass-thru proxy, full URL starting with `http:` or `https:`
+    - pass-thru proxy, full URL starting with `http:`, `https:` or `unix:`
     - `params` is a full URL of backend web server
+      - supports webserver at unix socket in the format of `unix:///path/to/unix-socket:/urlpath`
     - `params` can be prefixed with comma-separated connection options between `{` and `}`
       - `cert` and `key` options to specify `https`-type backend client's cert/key files 
       - `fp-hdr`, `cn-hdr`, `subj-hdr` and `cert-hdr` options forward client-sent certificate SHA256 fingerprint,

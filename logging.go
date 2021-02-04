@@ -77,6 +77,7 @@ func NewHTTPLogger(h http.Handler, rl *RemoteLogger) *HTTPLogger {
 
 type RemoteLogger struct {
 	RemoteLogURL string
+	HTTPClient   *http.Client
 }
 
 func (rl *RemoteLogger) log(logType string, msg interface{}) error {
@@ -89,7 +90,7 @@ func (rl *RemoteLogger) log(logType string, msg interface{}) error {
 		return err
 	}
 	go func() {
-		if resp, err := http.DefaultClient.Post(rl.RemoteLogURL, "application/json", bytes.NewBuffer(logData)); err != nil {
+		if resp, err := rl.HTTPClient.Post(rl.RemoteLogURL, "application/json", bytes.NewBuffer(logData)); err != nil {
 			logf(nil, logLevelError, "Cannot submit log[%s]: %s (%#v)", logType, err, resp)
 		} else {
 			if err := resp.Body.Close(); err != nil {

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
+	"os"
 
 	"github.com/lib/pq"
 )
@@ -78,8 +80,20 @@ func main() {
 	}
 	defer sqlInsert.Close()
 
+	listenProto := "tcp"
+	if (*listenFlag)[:1] == "/" || (*listenFlag)[:1] == "@" || (*listenFlag)[:2] == "./" {
+		listenProto = "unix"
+		if (*listenFlag)[:1] != "@" {
+			_ = os.Remove(*listenFlag)
+		}
+	}
+
 	log.Printf("Listening on %s", *listenFlag)
-	if err := http.ListenAndServe(*listenFlag, LogReceiver{InsertStatement: sqlInsert, AddURL: haveUrl}); err != nil {
+	ln, err := net.Listen(listenProto, *listenFlag)
+	if err != nil {
+		log.Fatalf("Listen on %#v failed: %s", *listenFlag, err)
+	}
+	if err := http.Serve(ln, LogReceiver{InsertStatement: sqlInsert, AddURL: haveUrl}); err != nil {
 		log.Fatalf("Could not start HTTP server: %s", err)
 	}
 }
