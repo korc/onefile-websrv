@@ -1,5 +1,5 @@
 // The MIT License
-// Copyright 2018-2020 Lauri Korts-Pärn
+// Copyright 2018-2021 Lauri Korts-Pärn
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
@@ -42,22 +42,6 @@ const (
 	authRoleContext contextKey = iota
 	remoteLoggerContext
 )
-
-// ConnWithDeadline is like net.Conn, but with deadline to read or write data
-type ConnWithDeadline struct {
-	Conn     net.Conn
-	Deadline time.Duration
-}
-
-func (c ConnWithDeadline) Read(p []byte) (n int, err error) {
-	c.Conn.SetReadDeadline(time.Now().Add(c.Deadline))
-	return c.Conn.Read(p)
-}
-
-func (c ConnWithDeadline) Write(p []byte) (n int, err error) {
-	c.Conn.SetWriteDeadline(time.Now().Add(c.Deadline))
-	return c.Conn.Write(p)
-}
 
 type arrayFlag []string
 
@@ -147,7 +131,7 @@ func main() {
 	wsReadTimeoutDuration := time.Duration(*wsReadTimeout) * time.Second
 
 	if len(urlMaps) == 0 {
-		urlMaps.Set("/=file:")
+		_ = urlMaps.Set("/=file:")
 	}
 
 	var switchToUser *user.User
@@ -195,7 +179,9 @@ func main() {
 		defaultHandler = &CORSHandler{Handler: defaultHandler}
 		for _, cors := range corsMaps {
 			pathIdx := strings.Index(cors, "=")
-			defaultHandler.(*CORSHandler).AddRecord(cors[:pathIdx], cors[pathIdx+1:])
+			if err := defaultHandler.(*CORSHandler).AddRecord(cors[:pathIdx], cors[pathIdx+1:]); err != nil {
+				log.Fatalf("Could not add CORS record: %s", err)
+			}
 		}
 	}
 
@@ -232,7 +218,7 @@ func main() {
 				}
 				hostnamePolicy = func(_ context.Context, host string) error {
 					if !hostNameRe.MatchString(host) {
-						return fmt.Errorf("Hostname %#v does not match pattern %#v", host, *acmeHosts)
+						return fmt.Errorf("hostname %#v does not match pattern %#v", host, *acmeHosts)
 					}
 					return nil
 				}
@@ -266,7 +252,11 @@ func main() {
 			}
 			tlsConfig = &tls.Config{GetCertificate: getCert}
 			if *acmeHTTP != "" {
-				go http.ListenAndServe(*acmeHTTP, acmeManager.HTTPHandler(nil))
+				go func() {
+					if err := http.ListenAndServe(*acmeHTTP, acmeManager.HTTPHandler(nil)); err != nil {
+						logf(nil, logLevelWarning, "cannot start ACME HTTP server at %s: %s", *acmeHTTP, err)
+					}
+				}()
 			}
 		}
 		if *tls12Max {
@@ -378,7 +368,7 @@ func main() {
 					if shCmd == "" {
 						shCmd = "/bin/sh"
 					}
-					shArgs := []string{}
+					shArgs := make([]string, 0)
 					if _, ok := connectParams["no-c"]; !ok {
 						shArgs = append(shArgs, "-c")
 					}
@@ -395,7 +385,7 @@ func main() {
 						return
 					}
 					if rl := r.Context().Value(remoteLoggerContext); rl != nil {
-						rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
+						_ = rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
 							"RequestNum": r.Context().Value("request-num"),
 							"LocalAddr":  conn.LocalAddr().String(),
 							"RemoteAddr": conn.RemoteAddr().String(),
@@ -632,7 +622,7 @@ func main() {
 		logTransport.RegisterProtocol("unix", &UnixRoundTripper{})
 		rl = &RemoteLogger{*reqlog, &http.Client{Transport: logTransport}}
 		ln = LoggedListener{ln, rl}
-		rl.log("server-start", struct {
+		_ = rl.log("server-start", struct {
 			ListenAddress string
 		}{*listenAddr})
 	}
