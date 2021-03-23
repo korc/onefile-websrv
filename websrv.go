@@ -14,7 +14,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -26,12 +25,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/webdav"
 )
@@ -105,7 +101,7 @@ func main() {
 		keyFile       = flag.String("key", "", "SSL key file")
 		wdCType       = flag.String("wdctype", "", "Fix content-type for Webdav GET/POST requests")
 		acmeHTTP      = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
-		wsReadTimeout = flag.Int("wstmout", 60, "Websocket alive check timer in seconds")
+		wsReadTimeout = flag.Duration("wstmout", 60*time.Second, "Websocket alive check timer in seconds")
 		loglevelFlag  = flag.String("loglevel", "info", "Max log level (one of "+strings.Join(logLevelStr, ", ")+")")
 		reqlog        = flag.String("reqlog", "", "URL to log request details to (supports also unix:///dir/unix-socket:/path URLs)")
 		tls12Max      = flag.Bool("tls12max", false, "Use TLS1.2 as maximum supported version")
@@ -127,8 +123,6 @@ func main() {
 			currentLogLevel = ll
 		}
 	}
-
-	wsReadTimeoutDuration := time.Duration(*wsReadTimeout) * time.Second
 
 	if len(urlMaps) == 0 {
 		_ = urlMaps.Set("/=file:")
@@ -331,189 +325,7 @@ func main() {
 			}
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket", "ws":
-			connectParams, handlerParams := parseCurlyParams(handlerParams)
-			http.HandleFunc(urlPath, func(w http.ResponseWriter, r *http.Request) {
-				defer logf(r, logLevelVerbose, "WS<->Sock handler finished")
-				var respHeader http.Header
-				wsMessageType := websocket.BinaryMessage
-				if msgType, ok := connectParams["type"]; ok && msgType == "text" {
-					wsMessageType = websocket.TextMessage
-				}
-				if subproto := r.Header.Get("Sec-Websocket-Protocol"); subproto != "" {
-					logf(r, logLevelInfo, "Sec-Websocket-Protocol: %#v", subproto)
-					respHeader = http.Header{"Sec-Websocket-Protocol": {subproto}}
-				}
-				c, err := upgrader.Upgrade(w, r, respHeader)
-				if err != nil {
-					logf(r, logLevelError, "Could not upgrade websocket: %s", err)
-					return
-				}
-				defer c.Close()
-				proto := "tcp"
-				address := handlerParams
-				if strings.HasPrefix(handlerParams, "unix:") {
-					proto = "unix"
-					address = handlerParams[strings.Index(handlerParams, ":")+1:]
-				}
-				var conn net.Conn
-				if strings.HasPrefix(handlerParams, "tls:") {
-					conn, err = tls.Dial("tcp", handlerParams[strings.Index(handlerParams, ":")+1:], &tls.Config{})
-					if err != nil {
-						logf(r, logLevelError, "Connect with TLS to %#v failed: %s", handlerParams, err)
-						return
-					}
-				} else if strings.HasPrefix(handlerParams, "exec:") {
-					execString := handlerParams[strings.Index(handlerParams, ":")+1:]
-					shCmd := connectParams["sh"]
-					if shCmd == "" {
-						shCmd = "/bin/sh"
-					}
-					shArgs := make([]string, 0)
-					if _, ok := connectParams["no-c"]; !ok {
-						shArgs = append(shArgs, "-c")
-					}
-					shArgs = append(shArgs, execString)
-					conn, err = newExecConn(shCmd, shArgs...)
-					if err != nil {
-						logf(r, logLevelError, "Cannot start %#v: %s", execString, err)
-						return
-					}
-				} else {
-					conn, err = net.DialTimeout(proto, address, 10*time.Second)
-					if err != nil {
-						logf(r, logLevelError, "Connect to %#v failed: %s", handlerParams, err)
-						return
-					}
-					if rl := r.Context().Value(remoteLoggerContext); rl != nil {
-						_ = rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
-							"RequestNum": r.Context().Value("request-num"),
-							"LocalAddr":  conn.LocalAddr().String(),
-							"RemoteAddr": conn.RemoteAddr().String(),
-							"Protocol":   proto,
-						})
-						log.Printf("remote logger: %#v", rl)
-					}
-				}
-				defer conn.Close()
-
-				var onceDone sync.Once
-				var keepRunning atomic.Value
-				keepRunning.Store(true)
-				done := make(chan struct{})
-				stopRunning := func() {
-					keepRunning.Store(false)
-					close(done)
-				}
-
-				dataFromConn := make(chan []byte)
-				dataFromWS := make(chan []byte)
-
-				go func() {
-					defer logf(r, logLevelDebug, "WSWriter finished")
-					defer onceDone.Do(stopRunning)
-					for keepRunning.Load().(bool) {
-						select {
-						case data := <-dataFromConn:
-							logf(r, logLevelDebug, "data (nil=%#v) from conn", data == nil)
-							if data == nil {
-								break
-							}
-							if err := c.WriteMessage(wsMessageType, data); err != nil {
-								logf(r, logLevelError, "Error writing to WS: %s", err)
-								break
-							}
-						case <-time.After(wsReadTimeoutDuration):
-							logf(r, logLevelVerbose, "No input from conn in %s", wsReadTimeoutDuration)
-						}
-					}
-				}()
-				go func() {
-					defer logf(r, logLevelVerbose, "SockWriter finished")
-					defer onceDone.Do(stopRunning)
-					checkingAlive := false
-					for keepRunning.Load().(bool) {
-						select {
-						case data := <-dataFromWS:
-							logf(r, logLevelDebug, "data (nil=%#v) from WS", data == nil)
-							if data == nil {
-								break
-							}
-							for len(data) > 0 {
-								nWrote, err := conn.Write(data)
-								if err != nil {
-									logf(r, logLevelWarning, "Error writing to socket: %s", err)
-									onceDone.Do(stopRunning)
-									break
-								}
-								data = data[nWrote:]
-							}
-						case <-time.After(wsReadTimeoutDuration):
-							logf(r, logLevelVerbose, "No data from WS in %s (checkingAlive=%#v)", wsReadTimeoutDuration, checkingAlive)
-							if checkingAlive {
-								logf(r, logLevelWarning, "Alive check failed.")
-								onceDone.Do(stopRunning)
-								break
-							} else {
-								checkingAlive = true
-								c.SetPongHandler(func(appData string) error {
-									checkingAlive = false
-									logf(r, logLevelVerbose, "Alive check succeeded: %#v", appData)
-									return nil
-								})
-								if err := c.WriteControl(websocket.PingMessage, []byte("are you alive?"), time.Now().Add(time.Second)); err != nil {
-									logf(r, logLevelError, "Could not send ping.")
-									break
-								} else {
-									logf(r, logLevelDebug, "Sent ping.")
-								}
-							}
-						}
-					}
-				}()
-				go func() {
-					defer logf(r, logLevelDebug, "SockReader finished")
-					defer onceDone.Do(stopRunning)
-					defer close(dataFromConn)
-					for keepRunning.Load().(bool) {
-						data := make([]byte, 8192)
-						nRead, err := conn.Read(data)
-						if err != nil {
-							if err == io.EOF {
-								logf(r, logLevelVerbose, "Socket EOF")
-							} else {
-								logf(r, logLevelWarning, "Cannot read from socket: %s", err)
-							}
-							break
-						}
-						dataFromConn <- data[:nRead]
-					}
-				}()
-				go func() {
-					defer logf(r, logLevelDebug, "WSReader finished")
-					defer onceDone.Do(stopRunning)
-					defer close(dataFromWS)
-					for keepRunning.Load().(bool) {
-						msgType, data, err := c.ReadMessage()
-						if err != nil {
-							if err == io.EOF {
-								logf(r, logLevelVerbose, "WS EOF")
-							} else {
-								ll := logLevelWarning
-								if !keepRunning.Load().(bool) && strings.Contains(err.Error(), "use of closed network connection") {
-									ll = logLevelVerbose
-								}
-								logf(r, ll, "Failed to read from WS: %#v (%s)", err, err)
-							}
-							break
-						}
-						if msgType != wsMessageType {
-							logf(r, logLevelWarning, "Not message type does not match: %#v != ", msgType, wsMessageType)
-						}
-						dataFromWS <- data
-					}
-				}()
-				<-done
-			})
+			http.Handle(urlPath, newWebSocketHandler(handlerParams).setReadTimeout(*wsReadTimeout))
 		case "http":
 			connectParams, handlerParams := parseCurlyParams(handlerParams)
 			httpURL, err := url.Parse(handlerParams)
