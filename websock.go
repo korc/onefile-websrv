@@ -106,12 +106,57 @@ type webSocketHandler struct {
 	connectParams map[string]string
 	handlerParams string
 	readTimeout   time.Duration
+	proto         string
+	address       string
+	tlsConfig     *tls.Config
 }
 
 func newWebSocketHandler(params string) *webSocketHandler {
-	wsh := &webSocketHandler{readTimeout: 60 * time.Second}
+	wsh := &webSocketHandler{readTimeout: 60 * time.Second, proto: "tcp"}
 	wsh.connectParams, wsh.handlerParams = parseCurlyParams(params)
+	wsh.chooseProtoAddr(wsh.handlerParams)
 	return wsh
+}
+
+func (wsh *webSocketHandler) chooseProtoAddr(handlerParams string) *webSocketHandler {
+	address := handlerParams
+	if address[:5] == "unix:" {
+		wsh.proto = "unix"
+		address = address[5:]
+	} else if address[:1] == "/" || address[:1] == "@" {
+		wsh.proto = "unix"
+	}
+	if address[:4] == "tls:" {
+		if wsh.tlsConfig == nil {
+			wsh.tlsConfig = &tls.Config{}
+		}
+		if wsh.connectParams["tlsVerify"] == "0" {
+			wsh.tlsConfig.InsecureSkipVerify = true
+		}
+		address = address[4:]
+	}
+	wsh.address = address
+	return wsh
+}
+
+func (wsh *webSocketHandler) dialRemote() (conn net.Conn, err error) {
+	if strings.HasPrefix(wsh.address, "exec:") {
+		execString := wsh.address[5:]
+		shCmd := wsh.connectParams["sh"]
+		if shCmd == "" {
+			shCmd = "/bin/sh"
+		}
+		shArgs := make([]string, 0)
+		if _, ok := wsh.connectParams["no-c"]; !ok {
+			shArgs = append(shArgs, "-c")
+		}
+		shArgs = append(shArgs, execString)
+		return newExecConn(shCmd, shArgs...)
+	}
+	if wsh.tlsConfig != nil {
+		return tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, wsh.proto, wsh.address, wsh.tlsConfig)
+	}
+	return net.DialTimeout(wsh.proto, wsh.address, 10*time.Second)
 }
 
 func (wsh *webSocketHandler) setReadTimeout(d time.Duration) *webSocketHandler {
@@ -136,52 +181,21 @@ func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer c.Close()
-	proto := "tcp"
-	address := wsh.handlerParams
-	if strings.HasPrefix(wsh.handlerParams, "unix:") {
-		proto = "unix"
-		address = wsh.handlerParams[strings.Index(wsh.handlerParams, ":")+1:]
-	}
-	var conn net.Conn
-	if strings.HasPrefix(wsh.handlerParams, "tls:") {
-		conn, err = tls.Dial("tcp", wsh.handlerParams[strings.Index(wsh.handlerParams, ":")+1:], &tls.Config{})
-		if err != nil {
-			logf(r, logLevelError, "Connect with TLS to %#v failed: %s", wsh.handlerParams, err)
-			return
-		}
-	} else if strings.HasPrefix(wsh.handlerParams, "exec:") {
-		execString := wsh.handlerParams[strings.Index(wsh.handlerParams, ":")+1:]
-		shCmd := wsh.connectParams["sh"]
-		if shCmd == "" {
-			shCmd = "/bin/sh"
-		}
-		shArgs := make([]string, 0)
-		if _, ok := wsh.connectParams["no-c"]; !ok {
-			shArgs = append(shArgs, "-c")
-		}
-		shArgs = append(shArgs, execString)
-		conn, err = newExecConn(shCmd, shArgs...)
-		if err != nil {
-			logf(r, logLevelError, "Cannot start %#v: %s", execString, err)
-			return
-		}
-	} else {
-		conn, err = net.DialTimeout(proto, address, 10*time.Second)
-		if err != nil {
-			logf(r, logLevelError, "Connect to %#v failed: %s", wsh.handlerParams, err)
-			return
-		}
-		if rl := r.Context().Value(remoteLoggerContext); rl != nil {
-			_ = rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
-				"RequestNum": r.Context().Value("request-num"),
-				"LocalAddr":  conn.LocalAddr().String(),
-				"RemoteAddr": conn.RemoteAddr().String(),
-				"Protocol":   proto,
-			})
-			log.Printf("remote logger: %#v", rl)
-		}
+	conn, err := wsh.dialRemote()
+	if err != nil {
+		logf(r, logLevelError, "Cannot connect to %#v: %s", wsh.address, err)
+		return
 	}
 	defer conn.Close()
+	if rl := r.Context().Value(remoteLoggerContext); rl != nil {
+		_ = rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
+			"RequestNum": r.Context().Value("request-num"),
+			"LocalAddr":  conn.LocalAddr().String(),
+			"RemoteAddr": conn.RemoteAddr().String(),
+			"Protocol":   wsh.proto,
+		})
+		log.Printf("remote logger: %#v", rl)
+	}
 
 	var onceDone sync.Once
 	var keepRunning atomic.Value
