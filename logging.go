@@ -115,8 +115,9 @@ func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RemoteAddr string
 			Method     string
 			URI        string
+			Host       string
 			Headers    http.Header
-		}{myEntryNr, r.RemoteAddr, r.Method, r.RequestURI, r.Header}); err != nil {
+		}{myEntryNr, r.RemoteAddr, r.Method, r.RequestURI, r.Host, r.Header}); err != nil {
 			logf(newReq, logLevelError, "Could not log request: %s", err)
 		} else {
 			requestLogged = true
