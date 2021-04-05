@@ -109,12 +109,20 @@ type webSocketHandler struct {
 	proto         string
 	address       string
 	tlsConfig     *tls.Config
+	messageType   int
 }
 
 func newWebSocketHandler(params string) *webSocketHandler {
-	wsh := &webSocketHandler{readTimeout: 60 * time.Second, proto: "tcp"}
+	wsh := &webSocketHandler{
+		readTimeout: 60 * time.Second,
+		proto:       "tcp",
+		messageType: websocket.BinaryMessage,
+	}
 	wsh.connectParams, wsh.handlerParams = parseCurlyParams(params)
 	wsh.chooseProtoAddr(wsh.handlerParams)
+	if msgType := wsh.connectParams["type"]; msgType == "text" {
+		wsh.messageType = websocket.TextMessage
+	}
 	return wsh
 }
 
@@ -164,13 +172,122 @@ func (wsh *webSocketHandler) setReadTimeout(d time.Duration) *webSocketHandler {
 	return wsh
 }
 
+func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFromWS chan []byte,
+	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
+	defer logf(r, logLevelDebug, "WSReader finished")
+	defer onceDone.Do(stopRunning)
+	defer close(dataFromWS)
+	for keepRunning.Load().(bool) {
+		msgType, data, err := c.ReadMessage()
+		if err != nil {
+			if err == io.EOF {
+				logf(r, logLevelVerbose, "WS EOF")
+			} else {
+				ll := logLevelWarning
+				if !keepRunning.Load().(bool) && strings.Contains(err.Error(), "use of closed network connection") {
+					ll = logLevelVerbose
+				}
+				logf(r, ll, "Failed to read from WS: %#v (%s)", err, err)
+			}
+			break
+		}
+		if msgType != wsh.messageType {
+			logf(r, logLevelWarning, "Not message type does not match: %#v != ", msgType, wsh.messageType)
+		}
+		dataFromWS <- data
+	}
+}
+
+func (wsh *webSocketHandler) wsWriter(r *http.Request, c *websocket.Conn, dataFromConn chan []byte,
+	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
+	defer logf(r, logLevelDebug, "WSWriter finished")
+	defer onceDone.Do(stopRunning)
+	for keepRunning.Load().(bool) {
+		select {
+		case data := <-dataFromConn:
+			logf(r, logLevelDebug, "data (nil=%#v) from conn", data == nil)
+			if data == nil {
+				break
+			}
+			if err := c.WriteMessage(wsh.messageType, data); err != nil {
+				logf(r, logLevelError, "Error writing to WS: %s", err)
+				break
+			}
+		case <-time.After(wsh.readTimeout):
+			logf(r, logLevelVerbose, "No input from conn in %s", wsh.readTimeout)
+		}
+	}
+}
+
+func (wsh *webSocketHandler) sockReader(r *http.Request, conn net.Conn, dataFromConn chan []byte,
+	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
+	defer logf(r, logLevelDebug, "SockReader finished")
+	defer onceDone.Do(stopRunning)
+	defer close(dataFromConn)
+	for keepRunning.Load().(bool) {
+		data := make([]byte, 8192)
+		nRead, err := conn.Read(data)
+		if err != nil {
+			if err == io.EOF {
+				logf(r, logLevelVerbose, "Socket EOF")
+			} else {
+				logf(r, logLevelWarning, "Cannot read from socket: %s", err)
+			}
+			break
+		}
+		dataFromConn <- data[:nRead]
+	}
+}
+
+func (wsh *webSocketHandler) sockWriter(r *http.Request, c *websocket.Conn, conn net.Conn, dataFromWS chan []byte,
+	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
+	defer logf(r, logLevelVerbose, "SockWriter finished")
+	defer onceDone.Do(stopRunning)
+	checkingAlive := false
+	for keepRunning.Load().(bool) {
+		select {
+		case data := <-dataFromWS:
+			logf(r, logLevelDebug, "data (nil=%#v) from WS", data == nil)
+			if data == nil {
+				break
+			}
+			for len(data) > 0 {
+				nWrote, err := conn.Write(data)
+				if err != nil {
+					logf(r, logLevelWarning, "Error writing to socket: %s", err)
+					onceDone.Do(stopRunning)
+					break
+				}
+				data = data[nWrote:]
+			}
+		case <-time.After(wsh.readTimeout):
+			logf(r, logLevelVerbose, "No data from WS in %s (checkingAlive=%#v)", wsh.readTimeout, checkingAlive)
+			if checkingAlive {
+				logf(r, logLevelWarning, "Alive check failed.")
+				onceDone.Do(stopRunning)
+				break
+			} else {
+				checkingAlive = true
+				c.SetPongHandler(func(appData string) error {
+					checkingAlive = false
+					logf(r, logLevelVerbose, "Alive check succeeded: %#v", appData)
+					return nil
+				})
+				if err := c.WriteControl(websocket.PingMessage, []byte("are you alive?"), time.Now().Add(time.Second)); err != nil {
+					logf(r, logLevelError, "Could not send ping.")
+					break
+				} else {
+					logf(r, logLevelDebug, "Sent ping.")
+				}
+			}
+		}
+	}
+
+}
+
 func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer logf(r, logLevelVerbose, "WS<->Sock handler finished")
 	var respHeader http.Header
-	wsMessageType := websocket.BinaryMessage
-	if msgType, ok := wsh.connectParams["type"]; ok && msgType == "text" {
-		wsMessageType = websocket.TextMessage
-	}
 	if subproto := r.Header.Get("Sec-Websocket-Protocol"); subproto != "" {
 		logf(r, logLevelInfo, "Sec-Websocket-Protocol: %#v", subproto)
 		respHeader = http.Header{"Sec-Websocket-Protocol": {subproto}}
@@ -209,109 +326,9 @@ func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	dataFromConn := make(chan []byte)
 	dataFromWS := make(chan []byte)
 
-	go func() {
-		defer logf(r, logLevelDebug, "WSWriter finished")
-		defer onceDone.Do(stopRunning)
-		for keepRunning.Load().(bool) {
-			select {
-			case data := <-dataFromConn:
-				logf(r, logLevelDebug, "data (nil=%#v) from conn", data == nil)
-				if data == nil {
-					break
-				}
-				if err := c.WriteMessage(wsMessageType, data); err != nil {
-					logf(r, logLevelError, "Error writing to WS: %s", err)
-					break
-				}
-			case <-time.After(wsh.readTimeout):
-				logf(r, logLevelVerbose, "No input from conn in %s", wsh.readTimeout)
-			}
-		}
-	}()
-	go func() {
-		defer logf(r, logLevelVerbose, "SockWriter finished")
-		defer onceDone.Do(stopRunning)
-		checkingAlive := false
-		for keepRunning.Load().(bool) {
-			select {
-			case data := <-dataFromWS:
-				logf(r, logLevelDebug, "data (nil=%#v) from WS", data == nil)
-				if data == nil {
-					break
-				}
-				for len(data) > 0 {
-					nWrote, err := conn.Write(data)
-					if err != nil {
-						logf(r, logLevelWarning, "Error writing to socket: %s", err)
-						onceDone.Do(stopRunning)
-						break
-					}
-					data = data[nWrote:]
-				}
-			case <-time.After(wsh.readTimeout):
-				logf(r, logLevelVerbose, "No data from WS in %s (checkingAlive=%#v)", wsh.readTimeout, checkingAlive)
-				if checkingAlive {
-					logf(r, logLevelWarning, "Alive check failed.")
-					onceDone.Do(stopRunning)
-					break
-				} else {
-					checkingAlive = true
-					c.SetPongHandler(func(appData string) error {
-						checkingAlive = false
-						logf(r, logLevelVerbose, "Alive check succeeded: %#v", appData)
-						return nil
-					})
-					if err := c.WriteControl(websocket.PingMessage, []byte("are you alive?"), time.Now().Add(time.Second)); err != nil {
-						logf(r, logLevelError, "Could not send ping.")
-						break
-					} else {
-						logf(r, logLevelDebug, "Sent ping.")
-					}
-				}
-			}
-		}
-	}()
-	go func() {
-		defer logf(r, logLevelDebug, "SockReader finished")
-		defer onceDone.Do(stopRunning)
-		defer close(dataFromConn)
-		for keepRunning.Load().(bool) {
-			data := make([]byte, 8192)
-			nRead, err := conn.Read(data)
-			if err != nil {
-				if err == io.EOF {
-					logf(r, logLevelVerbose, "Socket EOF")
-				} else {
-					logf(r, logLevelWarning, "Cannot read from socket: %s", err)
-				}
-				break
-			}
-			dataFromConn <- data[:nRead]
-		}
-	}()
-	go func() {
-		defer logf(r, logLevelDebug, "WSReader finished")
-		defer onceDone.Do(stopRunning)
-		defer close(dataFromWS)
-		for keepRunning.Load().(bool) {
-			msgType, data, err := c.ReadMessage()
-			if err != nil {
-				if err == io.EOF {
-					logf(r, logLevelVerbose, "WS EOF")
-				} else {
-					ll := logLevelWarning
-					if !keepRunning.Load().(bool) && strings.Contains(err.Error(), "use of closed network connection") {
-						ll = logLevelVerbose
-					}
-					logf(r, ll, "Failed to read from WS: %#v (%s)", err, err)
-				}
-				break
-			}
-			if msgType != wsMessageType {
-				logf(r, logLevelWarning, "Not message type does not match: %#v != ", msgType, wsMessageType)
-			}
-			dataFromWS <- data
-		}
-	}()
+	go wsh.wsWriter(r, c, dataFromConn, &onceDone, &keepRunning, stopRunning)
+	go wsh.sockWriter(r, c, conn, dataFromWS, &onceDone, &keepRunning, stopRunning)
+	go wsh.sockReader(r, conn, dataFromConn, &onceDone, &keepRunning, stopRunning)
+	go wsh.wsReader(r, c, dataFromWS, &onceDone, &keepRunning, stopRunning)
 	<-done
 }
