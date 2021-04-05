@@ -7,10 +7,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -115,13 +117,12 @@ func readWriteGlnWS(t *testing.T, srv *httptest.Server, testString []byte) (ret 
 }
 
 func readWriteGrlWS(t *testing.T, srv *httptest.Server, testString []byte) (ret []byte) {
-	ws, resp, err := grlws.DefaultDialer.Dial("ws"+srv.URL[4:], nil)
+	ws, _, err := grlws.DefaultDialer.Dial("ws"+srv.URL[4:], nil)
 	if err != nil {
 		t.Errorf("Cannot dial: %s", err)
 		return
 	}
 	defer ws.Close()
-	t.Logf("dial response: %#v", resp)
 	var plt int
 
 	if msgType, buf, err := ws.ReadMessage(); err != nil {
@@ -171,7 +172,7 @@ func genSelfSigned(t *testing.T) tls.Certificate {
 }
 
 func TestWebSocket(t *testing.T) {
-	//currentLogLevel = logLevelFatal
+	currentLogLevel = logLevelError
 	testString1, _ := hex.DecodeString("516934b05d9bf61fd01c5a8bbb87c112f929734620094f180ef87fc7133082a05580b0929f167c576c92deb9eff8b48dc717d524d4d6cb91d706b5baa91cd6075ed0cdf2280cedcee7ca7132a5c2420e989638dfd03464b9ac090d175ddea66ae365513838fd943fd723705660eea2fb9a0c2acda51b9fa93eb0a7ff24279ae00a25117e511459ff62a62328454e35721ae3e83cb82022254760f9ba9fa87a5000f51c7494a343c527ab84dd54c2b60cb97c792c36ff0a5a4d0ec0ee4bbccbdc39092e4c65a9552cc7a2fb1cfe13af83b2034994b575e5167e5744d7875b5e9d2daba171303a1647d46cf213e9fb3ea7386e9523f146b812a94ddb19f1e68f23dcf68d53715588fbf753d1f2b37ce6a496fd8ef0068968aa31f4aad27b33d0d2e81e000226da1a9e2916ab22b978466ed77fc722e7eaca8921d04f9aea9cc59bd29eb6308555667a1a5ddffba7f3112d995169fb591856121fd5f5cde31c04afa2e28378bf7e42b967a547971fbae3186e297be4c37da03e00420d5c2130bc98b5160bf092c493644eeaf4fcfa23c8dbb94da1757fecb819b96c3dd4e19b598179c87f4a4ea6749a33d50ccd2969c2047e017109b825070d7bb9b757074f70a969265223e79bb30f1f7eff991aa0047eaf02d432e9ce7a43d1522539d65adc20c2429a60f14602bdf48306a094a3add082d0deaa39c848e59be62685d13d34137f582da334e8a371f1074dd24aada7ac0d3dc22ae3d9bae2328dd9a3168ea1fab0d5acc1d30f62cc710d84915d1ca471af6692a6ec5d25ec9f2fc7b891e31def656bc9a35937d5ec65433db3e7c890ca7a421877ba732bc0c389e50264ca07cae1065222bc1a4612c7073739fcabdbc1e5ee8e626887266431cabef7c9307ac6b5daf8db6727e0ca9c0c0c1fe1eebd983854223ce5fbaa8f4584ba8ad58ad38679cd0c5884b536a180c2c6ffa51bce1df5658722fe92fb44503f1dfd872fccd59421850b188c5173772ffae5d3a4a89cc0136cedf443f0d9db8161c86477535e19cfa183ae19dfa330eae5c741d153cfcf67928b273813efd55571d42ef64a7b83f933860d54325ef591bb1ac0c394cf9d7a1c858255326f3c291576cabd01c943933903b56d7c5b4eb9481159c31617dd61055d2d5585346aa930bd85d680ef54090e63c325d3f85f22efb2f48a35c32661c778233c5c629c0586228267683aec77b4bb68d232a96baab1c93a0db1cdf6313eaeabb36a4fb26c23b96b7ddcaae7652b429735965b0a8dd60d1d383596894ab97a97ab413e7ef045e6c18a09889d6eacd4e9ea16229e0959f754838f05f2756e866e1b2a5af7d95f417a57befd9c5e04740c9a7166a938f07759edc75b303ff5ffa6acbe3bfe6af92f6cf543793d5050600115097731a7086398c20751a55de0abed6d0820b5d2cae35d")
 
 	t.Run("tcp", func(t *testing.T) {
@@ -278,5 +279,29 @@ func TestWebSocket(t *testing.T) {
 					hex.EncodeToString(reply), hex.EncodeToString(testString))
 			}
 		})
+	})
+
+	t.Run("inject-req-nr", func(t *testing.T) {
+		beSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(fmt.Sprintf("request headers are %#v", r.Header)))
+		}))
+		defer beSrv.Close()
+		srv := httptest.NewServer(newWebSocketHandler("{injReqNrHdr=X-Req-Nr}" + beSrv.Listener.Addr().String()))
+		defer srv.Close()
+		conn, _, err := grlws.DefaultDialer.Dial("ws"+srv.URL[4:], nil)
+		if err != nil {
+			t.Errorf("Could not dial to %#v: %s", srv.URL, err)
+			return
+		}
+		conn.WriteMessage(grlws.BinaryMessage, []byte("GET http://example.com HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+		_, reply, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("Failed to read reply: %s", err)
+			return
+		}
+		t.Logf("X-Req-Nr reply: %#v", string(reply))
+		if bytes.Index(reply, []byte("X-Req-Nr")) == -1 {
+			t.Errorf("X-Req-Nr not found in reply: %#v", string(reply))
+		}
 	})
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -103,13 +105,14 @@ func (e *execConn) Close() error {
 }
 
 type webSocketHandler struct {
-	connectParams map[string]string
-	handlerParams string
-	readTimeout   time.Duration
-	proto         string
-	address       string
-	tlsConfig     *tls.Config
-	messageType   int
+	connectParams         map[string]string
+	handlerParams         string
+	readTimeout           time.Duration
+	proto                 string
+	address               string
+	tlsConfig             *tls.Config
+	messageType           int
+	injectRequestNrHeader string
 }
 
 func newWebSocketHandler(params string) *webSocketHandler {
@@ -123,6 +126,7 @@ func newWebSocketHandler(params string) *webSocketHandler {
 	if msgType := wsh.connectParams["type"]; msgType == "text" {
 		wsh.messageType = websocket.TextMessage
 	}
+	wsh.injectRequestNrHeader = wsh.connectParams["injReqNrHdr"]
 	return wsh
 }
 
@@ -177,6 +181,7 @@ func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFr
 	defer logf(r, logLevelDebug, "WSReader finished")
 	defer onceDone.Do(stopRunning)
 	defer close(dataFromWS)
+	injectRequestNrHeader := wsh.injectRequestNrHeader
 	for keepRunning.Load().(bool) {
 		msgType, data, err := c.ReadMessage()
 		if err != nil {
@@ -193,6 +198,14 @@ func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFr
 		}
 		if msgType != wsh.messageType {
 			logf(r, logLevelWarning, "Not message type does not match: %#v != ", msgType, wsh.messageType)
+		}
+		if injectRequestNrHeader != "" {
+			if idx := bytes.Index(data, []byte("\r\n")); idx == -1 {
+				logf(r, logLevelWarning, "Inject request nr header set(%#v), but no \\r\\n in incoming data: %#v", injectRequestNrHeader, string(data))
+			} else {
+				data = bytes.Join([][]byte{data[:idx], []byte(fmt.Sprintf("\r\n%s: %v", injectRequestNrHeader, r.Context().Value("request-num"))), data[idx:]}, []byte{})
+			}
+			injectRequestNrHeader = ""
 		}
 		dataFromWS <- data
 	}
