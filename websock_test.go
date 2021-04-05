@@ -181,7 +181,7 @@ func TestWebSocket(t *testing.T) {
 		}
 		defer l.Close()
 		go handleTestSocket(l)
-		t.Run("direct", func(t *testing.T) {
+		t.Run("binary", func(t *testing.T) {
 			srv := httptest.NewServer(newWebSocketHandler(l.Addr().String()))
 			defer srv.Close()
 			reply := readWriteGrlWS(t, srv, testString1)
@@ -190,7 +190,7 @@ func TestWebSocket(t *testing.T) {
 					hex.EncodeToString(reply), hex.EncodeToString(testString1))
 			}
 		})
-		t.Run("tcp-text", func(t *testing.T) {
+		t.Run("text", func(t *testing.T) {
 			srv := httptest.NewServer(newWebSocketHandler("{type=text}" + l.Addr().String()))
 			defer srv.Close()
 			buf := testString1
@@ -242,6 +242,22 @@ func TestWebSocket(t *testing.T) {
 		})
 		t.Run("unix-prefix", func(t *testing.T) {
 			srv := httptest.NewServer(newWebSocketHandler("unix:/tmp/test-ws-listen"))
+			defer srv.Close()
+			reply := readWriteGrlWS(t, srv, testString1)
+			if !bytes.Equal(reply, testString1) {
+				t.Errorf("Reply[%d] does not match test[%d] %#v != %#v", len(reply), len(testString1),
+					hex.EncodeToString(reply), hex.EncodeToString(testString1))
+			}
+		})
+		t.Run("abstract", func(t *testing.T) {
+			l, err := net.Listen("unix", "@/test/abstract/ws")
+			if err != nil {
+				t.Fatal("Cannot start UNIX listener: ", err)
+			}
+			defer l.Close()
+			go handleTestSocket(l)
+
+			srv := httptest.NewServer(newWebSocketHandler("@/test/abstract/ws"))
 			defer srv.Close()
 			reply := readWriteGrlWS(t, srv, testString1)
 			if !bytes.Equal(reply, testString1) {
