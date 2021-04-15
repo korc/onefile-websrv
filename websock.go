@@ -215,16 +215,17 @@ func (wsh *webSocketHandler) wsWriter(r *http.Request, c *websocket.Conn, dataFr
 	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
 	defer logf(r, logLevelDebug, "WSWriter finished")
 	defer onceDone.Do(stopRunning)
+loop:
 	for keepRunning.Load().(bool) {
 		select {
 		case data := <-dataFromConn:
 			logf(r, logLevelDebug, "data (nil=%#v) from conn", data == nil)
 			if data == nil {
-				break
+				break loop
 			}
 			if err := c.WriteMessage(wsh.messageType, data); err != nil {
 				logf(r, logLevelError, "Error writing to WS: %s", err)
-				break
+				break loop
 			}
 		case <-time.After(wsh.readTimeout):
 			logf(r, logLevelVerbose, "No input from conn in %s", wsh.readTimeout)
@@ -257,12 +258,13 @@ func (wsh *webSocketHandler) sockWriter(r *http.Request, c *websocket.Conn, conn
 	defer logf(r, logLevelVerbose, "SockWriter finished")
 	defer onceDone.Do(stopRunning)
 	checkingAlive := false
+loop:
 	for keepRunning.Load().(bool) {
 		select {
 		case data := <-dataFromWS:
 			logf(r, logLevelDebug, "data (nil=%#v) from WS", data == nil)
 			if data == nil {
-				break
+				break loop
 			}
 			for len(data) > 0 {
 				nWrote, err := conn.Write(data)
@@ -278,7 +280,7 @@ func (wsh *webSocketHandler) sockWriter(r *http.Request, c *websocket.Conn, conn
 			if checkingAlive {
 				logf(r, logLevelWarning, "Alive check failed.")
 				onceDone.Do(stopRunning)
-				break
+				break loop
 			} else {
 				checkingAlive = true
 				c.SetPongHandler(func(appData string) error {
@@ -288,7 +290,7 @@ func (wsh *webSocketHandler) sockWriter(r *http.Request, c *websocket.Conn, conn
 				})
 				if err := c.WriteControl(websocket.PingMessage, []byte("are you alive?"), time.Now().Add(time.Second)); err != nil {
 					logf(r, logLevelError, "Could not send ping.")
-					break
+					break loop
 				} else {
 					logf(r, logLevelDebug, "Sent ping.")
 				}
@@ -333,6 +335,7 @@ func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	stopRunning := func() {
 		keepRunning.Store(false)
+		time.Sleep(100 * time.Millisecond)
 		close(done)
 	}
 

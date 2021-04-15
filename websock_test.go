@@ -55,7 +55,6 @@ func handleTestSocket(l net.Listener) {
 					log.Fatalf("Could not write new buf %#v[%d] %s", string(newBuf), len(newBuf), err)
 				}
 				//log.Printf("Sent reply: %#v[%d]", string(newBuf), len(newBuf))
-				time.Sleep(testCloseWaitDelay)
 			}
 		}(conn)
 	}
