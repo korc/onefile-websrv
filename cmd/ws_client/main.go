@@ -12,26 +12,27 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/net/websocket"
+	"github.com/gorilla/websocket"
 )
 
 var exitOnBadStatus = false
 
+const bufSize = 32 * 1024
+
 //goland:noinspection GoUnhandledErrorResult
-func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadCloser) error {
+func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, src io.ReadCloser) error {
 	defer dst.Close()
 	defer src.Close()
-	log.Printf("Dialing to %s", wsConfig.Location)
-	ws, err := websocket.DialConfig(wsConfig)
+	log.Printf("Dialing to %s", location)
+	ws, resp, err := websocket.DefaultDialer.Dial(location, headers)
 	if err != nil {
 		log.Print("Could not connect: ", err)
-		if dialErr, ok := err.(*websocket.DialError); ok && exitOnBadStatus && dialErr.Err == websocket.ErrBadStatus {
+		if resp.StatusCode == http.StatusBadRequest && exitOnBadStatus {
 			os.Exit(100)
 		}
 		return err
 	}
 	defer ws.Close()
-	ws.PayloadType = websocket.BinaryFrame
 
 	log.Printf("Connected, transferring data")
 
@@ -43,7 +44,20 @@ func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadC
 		defer src.Close()
 		defer dst.Close()
 		defer log.Printf("local closed the socket")
-		io.Copy(ws, src)
+		for {
+			buf := make([]byte, bufSize)
+			nRead, err := src.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("Error reading socket: %s", err)
+				}
+				break
+			}
+			if err := ws.WriteMessage(websocket.BinaryMessage, buf[:nRead]); err != nil {
+				log.Printf("Error writing WS: %s", err)
+				break
+			}
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -51,7 +65,25 @@ func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadC
 		defer dst.Close()
 		defer src.Close()
 		defer log.Printf("remote closed the socket")
-		io.Copy(dst, ws)
+		for {
+			msgType, buf, err := ws.ReadMessage()
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("Error reading WS (%d): %s", msgType, err)
+				}
+				break
+			}
+			toWrite := len(buf)
+			for toWrite > 0 {
+				nWritten, err := dst.Write(buf)
+				if err != nil {
+					log.Print("Error writing socket: ", err)
+					break
+				}
+				buf = buf[nWritten:]
+				toWrite = len(buf)
+			}
+		}
 	}()
 	wg.Wait()
 	log.Printf("finished")
@@ -60,7 +92,6 @@ func connectAndLoop(wsConfig *websocket.Config, dst io.WriteCloser, src io.ReadC
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	originFlag := flag.String("origin", "http://localhost", "websocket origin")
 	certFlag := flag.String("cert", "", "Certificate for SSL connection")
 	certKeyFlag := flag.String("key", "", "Key for SSL certificate")
 	listenAddr := flag.String("listen", "", "Listen on address instead of stdin/out")
@@ -76,16 +107,12 @@ func main() {
 	url := args[0]
 
 	exitOnBadStatus = *exitOnBadStatusFlag
-	wsConfig, err := websocket.NewConfig(url, *originFlag)
-	if err != nil {
-		panic(err)
-	}
 
 	if *certFlag != "" {
 		if *certKeyFlag == "" {
 			*certKeyFlag = *certFlag
 		}
-		wsConfig.TlsConfig = &tls.Config{
+		websocket.DefaultDialer.TLSClientConfig = &tls.Config{
 			GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
 				log.Printf("Client certificate requested: %#v", info)
 				cert, err := tls.LoadX509KeyPair(*certFlag, *certKeyFlag)
@@ -97,15 +124,16 @@ func main() {
 		}
 	}
 
+	headers := make(http.Header)
+
 	if len(args) > 1 {
-		wsConfig.Header = http.Header{}
 		for i := 1; i < len(args); i++ {
 			kv := strings.SplitN(args[i], "=", 2)
-			wsConfig.Header.Add(kv[0], kv[1])
+			headers.Set(kv[0], kv[1])
 		}
 	}
 	if *listenAddr == "" && *connectAddr == "" {
-		connectAndLoop(wsConfig, os.Stdout, os.Stdin)
+		connectAndLoop(url, headers, os.Stdout, os.Stdin)
 	} else if *connectAddr == "" {
 		proto := "tcp"
 		if idx := strings.Index(*listenAddr, "://"); idx >= 0 {
@@ -122,7 +150,7 @@ func main() {
 			if err != nil {
 				log.Fatal("Error accepting client: ", err)
 			}
-			go connectAndLoop(wsConfig, conn, conn)
+			go connectAndLoop(url, headers, conn, conn)
 		}
 	} else {
 		proto := "tcp"
@@ -137,6 +165,6 @@ func main() {
 		} else {
 			log.Print("Connected")
 		}
-		connectAndLoop(wsConfig, conn, conn)
+		connectAndLoop(url, headers, conn, conn)
 	}
 }
