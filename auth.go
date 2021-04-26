@@ -39,11 +39,21 @@ type AuthHandler struct {
 	ACLs           []ACLRecord
 }
 
+var authEnvDef = regexp.MustCompile(`\$\{[a-zA-Z0-9_]+\}`)
+
 // AddAuth : add authentication method to identify role(s)
 func (ah *AuthHandler) AddAuth(method, check, name string) {
 	if ah.Auths == nil {
 		ah.Auths = make(map[string]map[string]string)
 	}
+
+	check = authEnvDef.ReplaceAllStringFunc(check, func(s string) string {
+		if val, ok := os.LookupEnv(s[2 : len(s)-1]); ok {
+			return val
+		}
+		logf(nil, logLevelFatal, "Cannot find variable in environment: %#v", s)
+		return ""
+	})
 
 	switch method {
 	case "CertKeyHash":

@@ -149,6 +149,7 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 - `-auth` option can be used to add new roles
   - multiple roles can be assigned with one method
   - `auth` value is method-specific
+  - can use environment variables in form of `${variable_name}` in `auth` part (presence in environment is mandatory)
   - possible values for `method` parameter
     - `Basic`
       - HTTP Basic authentication (WEAK security)
