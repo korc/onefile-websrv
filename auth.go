@@ -46,6 +46,46 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 	}
 
 	switch method {
+	case "CertKeyHash":
+		if strings.HasPrefix(check, "file:") {
+			pemFileData, err := os.ReadFile(check[5:])
+			if err != nil {
+				logf(nil, logLevelFatal, "Cannot read file %#v: %s", check[5:], err)
+			}
+			nrDone := 0
+			for len(pemFileData) > 0 {
+				var pemBlock *pem.Block
+				pemBlock, pemFileData = pem.Decode(pemFileData)
+				if pemBlock == nil {
+					break
+				}
+				switch pemBlock.Type {
+				case "PUBLIC KEY":
+					if _, err := x509.ParsePKIXPublicKey(pemBlock.Bytes); err != nil {
+						logf(nil, logLevelFatal, "Cannot parse public key: %s", err)
+					}
+				case "CERTIFICATE":
+					crt, err := x509.ParseCertificate(pemBlock.Bytes)
+					if err != nil {
+						logf(nil, logLevelFatal, "Cannot parse certificate: %s", err)
+					}
+					pemBlock = &pem.Block{Bytes: crt.RawSubjectPublicKeyInfo}
+				default:
+					logf(nil, logLevelInfo, "Skipping %#v pem data", pemBlock.Type)
+					continue
+				}
+				h := sha256.New()
+				h.Write(pemBlock.Bytes)
+				ah.AddAuth(method, hex.EncodeToString(h.Sum(nil)), name)
+				nrDone += 1
+
+			}
+			if nrDone == 0 {
+				logf(nil, logLevelFatal, "No public keys or certificates found in %#v", check[5:])
+			}
+			logf(nil, logLevelInfo, "Got %d public keys from %#v for role %#v", nrDone, check[5:], name)
+			return
+		}
 	case "Cert", "CertBy":
 		if strings.HasPrefix(check, "file:") {
 			data, err := ioutil.ReadFile(check[5:])
@@ -295,6 +335,16 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 				}
 			}
 			lastPeerCert = crt
+			if certKeyHashes, ok := ah.Auths["CertKeyHash"]; ok {
+				h := sha256.New()
+				h.Write(crt.RawSubjectPublicKeyInfo)
+				hashCheck := hex.EncodeToString(h.Sum(nil))
+				if gotRoles, ok := certKeyHashes[hashCheck]; ok {
+					for _, role := range strings.Split(gotRoles, "+") {
+						haveRoles[role] = ah.ACLs == nil
+					}
+				}
+			}
 			if authCerts, ok := ah.Auths["Cert"]; ok {
 				if gotRoles, ok := authCerts[peerHash]; ok {
 					for _, role := range strings.Split(gotRoles, "+") {
@@ -373,7 +423,7 @@ func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			switch k {
 			case "JWTSecret", "JWTFilePat":
 				w.Header().Add("WWW-Authenticate", "Bearer realm=\"Authentication required\"")
-			case "Cert", "CertBy":
+			case "Cert", "CertBy", "CertKeyHash":
 			default:
 				w.Header().Add("WWW-Authenticate", fmt.Sprintf("%s realm=\"auth-required\"", k))
 			}

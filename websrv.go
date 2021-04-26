@@ -153,7 +153,7 @@ func main() {
 			}
 			authMethod := auth[tagIdx+1 : methodIdx]
 			switch authMethod {
-			case "Cert", "CertBy":
+			case "Cert", "CertBy", "CertKeyHash":
 				haveCertAuth = true
 			}
 			defaultHandler.(*AuthHandler).AddAuth(authMethod, auth[methodIdx+1:], role)
