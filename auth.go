@@ -88,26 +88,39 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 		}
 	case "Cert", "CertBy":
 		if strings.HasPrefix(check, "file:") {
-			data, err := ioutil.ReadFile(check[5:])
+			fileName := check[5:]
+			data, err := ioutil.ReadFile(fileName)
 			if err != nil {
-				logf(nil, logLevelFatal, "Cannot read file %#v: %s", check[5:], err)
+				logf(nil, logLevelFatal, "Cannot read file %#v: %s", fileName, err)
 			}
-			pemBlock, rest := pem.Decode(data)
-			logf(nil, logLevelDebug, "Read pem type %s (%d bytes of data)", pemBlock.Type, len(pemBlock.Bytes))
-			if len(rest) > 0 {
-				logf(nil, logLevelInfo, "Extra %d bytes after pem", len(rest))
+			nrDone := 0
+			var pemBlock *pem.Block
+			for len(data) > 0 {
+				pemBlock, data = pem.Decode(data)
+				if pemBlock == nil {
+					break
+				}
+				if pemBlock.Type != "CERTIFICATE" {
+					continue
+				}
+				cert, err := x509.ParseCertificate(pemBlock.Bytes)
+				if err != nil {
+					logf(nil, logLevelFatal, "Could not load certificate: %s", err)
+				}
+				if method == "Cert" {
+					h := sha256.New()
+					h.Write(cert.Raw)
+					ah.AddAuth(method, hex.EncodeToString(h.Sum(nil)), name)
+				} else {
+					ah.AddAuth(method, hex.EncodeToString(cert.Raw), name)
+				}
+				nrDone += 1
 			}
-			cert, err := x509.ParseCertificate(pemBlock.Bytes)
-			if err != nil {
-				logf(nil, logLevelFatal, "Could not load certificate: %s", err)
+			if nrDone == 0 {
+				logf(nil, logLevelFatal, "No certificates found in %#v", fileName)
 			}
-			if method == "Cert" {
-				h := sha256.New()
-				h.Write(cert.Raw)
-				check = hex.EncodeToString(h.Sum(nil))
-			} else {
-				check = hex.EncodeToString(cert.Raw)
-			}
+			logf(nil, logLevelInfo, "Read %d certificates from %#v for role %#v", nrDone, fileName, name)
+			return
 		}
 	case "Basic", "JWTSecret", "IPRange", "JWTFilePat":
 	default:
