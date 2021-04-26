@@ -58,14 +58,15 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 	switch method {
 	case "CertKeyHash":
 		if strings.HasPrefix(check, "file:") {
-			pemFileData, err := os.ReadFile(check[5:])
+			fileName := check[5:]
+			data, err := os.ReadFile(fileName)
 			if err != nil {
-				logf(nil, logLevelFatal, "Cannot read file %#v: %s", check[5:], err)
+				logf(nil, logLevelFatal, "Cannot read file %#v: %s", fileName, err)
 			}
 			nrDone := 0
-			for len(pemFileData) > 0 {
+			for len(data) > 0 {
 				var pemBlock *pem.Block
-				pemBlock, pemFileData = pem.Decode(pemFileData)
+				pemBlock, data = pem.Decode(data)
 				if pemBlock == nil {
 					break
 				}
@@ -91,9 +92,9 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 
 			}
 			if nrDone == 0 {
-				logf(nil, logLevelFatal, "No public keys or certificates found in %#v", check[5:])
+				logf(nil, logLevelFatal, "No public keys or certificates found in %#v", fileName)
 			}
-			logf(nil, logLevelInfo, "Got %d public keys from %#v for role %#v", nrDone, check[5:], name)
+			logf(nil, logLevelInfo, "Got %d public keys from %#v for role %#v", nrDone, fileName, name)
 			return
 		}
 	case "Cert", "CertBy":
@@ -134,7 +135,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 		}
 	case "Basic", "JWTSecret", "IPRange", "JWTFilePat":
 	default:
-		logf(nil, logLevelFatal, "Supported mechanisms: Basic, Cert, CertBy, JWTSecret, JWTFilePat, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
+		logf(nil, logLevelFatal, "Supported mechanisms: Basic, Cert, CertBy, CertKeyHash, JWTSecret, JWTFilePat, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
 	}
 	if ah.Auths[method] == nil {
 		ah.Auths[method] = make(map[string]string)
