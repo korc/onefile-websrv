@@ -251,96 +251,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 				}
 			}
 		case "Bearer":
-			for signer := range ah.Auths["JWTSecret"] {
-				token, err := jwt.Parse(authValue, func(token *jwt.Token) (interface{}, error) {
-					return []byte(signer), nil
-				})
-				if err != nil {
-					logf(r, logLevelWarning, "Failed with secret: %#v: %s", signer, err)
-					continue
-				}
-				if token.Valid {
-					for _, gotRole := range strings.Split(ah.Auths["JWTSecret"][signer], "+") {
-						haveRoles[gotRole] = ah.ACLs == nil
-					}
-				}
-			}
-			for fpath := range ah.Auths["JWTFilePat"] {
-				// authValue is file path. '**' in filename will be tested in order of:
-				// URL, URL without file extension, without filename, with all path components removed one by one
-				haveStars := strings.Index(fpath, "**") != -1
-				if haveStars && len(neededRoles) == 0 {
-					break
-				}
-				testUrl := r.URL.Path
-				testList := []string{strings.Replace(fpath, "**", testUrl[1:], 1)}
-				if haveStars {
-					slashIdx := strings.LastIndex(testUrl, "/")
-					for {
-						dotIdx := strings.LastIndex(testUrl, ".")
-						if dotIdx <= slashIdx {
-							break
-						}
-						testUrl = testUrl[:dotIdx]
-						testList = append(testList, strings.Replace(fpath, "**", testUrl[1:], 1))
-					}
-					for slashIdx > 0 {
-						testUrl = testUrl[:slashIdx]
-						testList = append(testList, strings.Replace(fpath, "**", testUrl[1:], 1))
-						slashIdx = strings.LastIndex(testUrl, "/")
-					}
-				}
-				for _, testPath := range testList {
-					logf(r, logLevelDebug, "Testing JWT auth file at %#v", testPath)
-					if file, err := os.Open(testPath); err == nil {
-						//noinspection GoDeferInLoop
-						defer file.Close()
-						tkn, err := jwt.Parse(authValue, func(token *jwt.Token) (i interface{}, e error) {
-							linescanner := bufio.NewScanner(file)
-							for linescanner.Scan() {
-								line := strings.SplitN(linescanner.Text(), ":", 2)
-								if line[0][:1] == "#" {
-									continue
-								}
-								if len(line) < 2 {
-									logf(r, logLevelError, "Line in JWT file %#v does not contain ':'", testPath)
-									continue
-								}
-								decodedVal, err := base64.RawURLEncoding.DecodeString(line[1])
-								if err != nil {
-									logf(r, logLevelError, "Cannot decode base64 of value in %#v", testPath)
-									continue
-								}
-								switch line[0] {
-								case "hmac":
-									if _, ok := token.Method.(*jwt.SigningMethodHMAC); ok {
-										return decodedVal, nil
-									}
-								case "rsa":
-									if _, ok := token.Method.(*jwt.SigningMethodRSA); ok {
-										return &rsa.PublicKey{N: (&big.Int{}).SetBytes(decodedVal), E: 0x10001}, nil
-									}
-								default:
-									logf(r, logLevelWarning, "unsupported mechanism %#v in JWT keyfile", line[0])
-								}
-							}
-							return
-						})
-						if err != nil {
-							logf(r, logLevelWarning, "Could not parse auth token: %s", err)
-							break
-						}
-						if tkn.Valid {
-							for _, gotRole := range strings.Split(ah.Auths["JWTFilePat"][fpath], "+") {
-								haveRoles[gotRole] = ah.ACLs == nil
-							}
-						}
-						break
-						//logf(r, logLevelDebug, "Searching for JWT file from %#v for URL %#v (authvalue=%#v)",
-						//	testPath, r.URL.Path, authValue)
-					}
-				}
-			}
+			ah.checkAuthPassBearer(authValue, r, haveRoles, neededRoles)
 		default:
 			return nil, errors.New("unsupported method")
 		}
@@ -432,6 +343,103 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		}
 	}
 	return nil, errors.New("need proper auth")
+}
+
+func (ah *AuthHandler) checkAuthPassJWT(jwtString string, r *http.Request, haveRoles, neededRoles map[string]bool) {
+	for signer := range ah.Auths["JWTSecret"] {
+		token, err := jwt.Parse(jwtString, func(token *jwt.Token) (interface{}, error) {
+			return []byte(signer), nil
+		})
+		if err != nil {
+			logf(r, logLevelWarning, "Failed with secret: %#v: %s", signer, err)
+			continue
+		}
+		if token.Valid {
+			for _, gotRole := range strings.Split(ah.Auths["JWTSecret"][signer], "+") {
+				haveRoles[gotRole] = ah.ACLs == nil
+			}
+		}
+	}
+	for fpath := range ah.Auths["JWTFilePat"] {
+		// authValue is file path. '**' in filename will be tested in order of:
+		// URL, URL without file extension, without filename, with all path components removed one by one
+		haveStars := strings.Contains(fpath, "**")
+		if haveStars && len(neededRoles) == 0 {
+			// if we exactly don't require any roles, skip some-what expensive file search altogether
+			break
+		}
+		testUrl := r.URL.Path
+		testList := []string{strings.Replace(fpath, "**", testUrl[1:], 1)}
+		if haveStars {
+			slashIdx := strings.LastIndex(testUrl, "/")
+			for {
+				dotIdx := strings.LastIndex(testUrl, ".")
+				if dotIdx <= slashIdx {
+					break
+				}
+				testUrl = testUrl[:dotIdx]
+				testList = append(testList, strings.Replace(fpath, "**", testUrl[1:], 1))
+			}
+			for slashIdx > 0 {
+				testUrl = testUrl[:slashIdx]
+				testList = append(testList, strings.Replace(fpath, "**", testUrl[1:], 1))
+				slashIdx = strings.LastIndex(testUrl, "/")
+			}
+		}
+		for _, testPath := range testList {
+			logf(r, logLevelDebug, "Testing JWT auth file at %#v", testPath)
+			if file, err := os.Open(testPath); err == nil {
+				defer file.Close()
+				tkn, err := jwt.Parse(jwtString, func(token *jwt.Token) (i interface{}, e error) {
+					linescanner := bufio.NewScanner(file)
+					for linescanner.Scan() {
+						line := strings.SplitN(linescanner.Text(), ":", 2)
+						if line[0][:1] == "#" {
+							continue
+						}
+						if len(line) < 2 {
+							logf(r, logLevelError, "Line in JWT file %#v does not contain ':'", testPath)
+							continue
+						}
+						decodedVal, err := base64.RawURLEncoding.DecodeString(line[1])
+						if err != nil {
+							logf(r, logLevelError, "Cannot decode base64 of value in %#v", testPath)
+							continue
+						}
+						switch line[0] {
+						case "hmac":
+							if _, ok := token.Method.(*jwt.SigningMethodHMAC); ok {
+								return decodedVal, nil
+							}
+						case "rsa":
+							if _, ok := token.Method.(*jwt.SigningMethodRSA); ok {
+								return &rsa.PublicKey{N: (&big.Int{}).SetBytes(decodedVal), E: 0x10001}, nil
+							}
+						default:
+							logf(r, logLevelWarning, "unsupported mechanism %#v in JWT keyfile", line[0])
+						}
+					}
+					return
+				})
+				if err != nil {
+					logf(r, logLevelWarning, "Could not parse auth token: %s", err)
+					break
+				}
+				if tkn.Valid {
+					for _, gotRole := range strings.Split(ah.Auths["JWTFilePat"][fpath], "+") {
+						haveRoles[gotRole] = ah.ACLs == nil
+					}
+				}
+				break
+				//logf(r, logLevelDebug, "Searching for JWT file from %#v for URL %#v (authvalue=%#v)",
+				//	testPath, r.URL.Path, authValue)
+			}
+		}
+	}
+}
+
+func (ah *AuthHandler) checkAuthPassBearer(authValue string, r *http.Request, haveRoles, neededRoles map[string]bool) {
+	ah.checkAuthPassJWT(authValue, r, haveRoles, neededRoles)
 }
 
 func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
