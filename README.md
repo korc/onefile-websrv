@@ -167,6 +167,8 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
     - `JWTSecret`
       - checks if JWT from `Authentication: Bearer` header is signed by specific authority
       - `auth` contains authority's shared secret
+      - can prefix `auth` with `{cookie|header|query=XXX}` to additionally look JWT token from specified cookie, header or query parameter named `XXX`. multiple locations have to be separated with comma.
+        - ex: `-auth viewer=JWTSecret:{cookie=viewacces,query=va}MySecretJWTKey`
     - `IPRange`
       - checks client's remote IP
       - `auth` is IP address with network mask length in format of `ip/masklen`
