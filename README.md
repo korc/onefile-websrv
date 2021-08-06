@@ -119,6 +119,7 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
       - `exec:COMMAND` to run COMMAND using `sh -c`
         - prefix `{sh=SHELL}` for alternate shell
         - prefix `{no-c=1}` for no `-c` option after shell command
+        - prefix `{sep=SEPARATOR}` to split string after `exec:` into arguments with _SEPARATOR_
       - `mux:ID` to share a websocket with other clients connected to the same `ID`
   - `http`
     - pass-thru proxy, full URL starting with `http:`, `https:` or `unix:`

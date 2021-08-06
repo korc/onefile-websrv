@@ -278,6 +278,24 @@ func TestWebSocket(t *testing.T) {
 					hex.EncodeToString(reply), hex.EncodeToString(testString))
 			}
 		})
+		t.Run("sep", func(t *testing.T) {
+			srv := httptest.NewServer(newWebSocketHandler("{sh=/bin/echo,no-c=1,sep=;}exec:1;2;3"))
+			defer srv.Close()
+			conn, _, err := grlws.DefaultDialer.Dial("ws"+srv.URL[4:], nil)
+			if err != nil {
+				t.Errorf("Cannot connect to %s: %s", srv.URL, err)
+				return
+			}
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				t.Errorf("Could not read message: %s", err)
+				return
+			}
+			if string(msg) != "1 2 3\n" {
+				t.Errorf("Messages is not \"1 2 3\": %#v", string(msg))
+				return
+			}
+		})
 	})
 
 	t.Run("inject-req-nr", func(t *testing.T) {

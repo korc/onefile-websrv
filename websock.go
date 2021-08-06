@@ -263,7 +263,11 @@ func (wsh *webSocketHandler) dialRemote(r *http.Request) (conn net.Conn, err err
 		if _, ok := wsh.connectParams["no-c"]; !ok {
 			shArgs = append(shArgs, "-c")
 		}
-		shArgs = append(shArgs, remote)
+		if sep, ok := wsh.connectParams["sep"]; ok {
+			shArgs = append(shArgs, strings.Split(remote, sep)...)
+		} else {
+			shArgs = append(shArgs, remote)
+		}
 		return newExecConn(shCmd, shArgs...)
 	} else if wsh.proto == "mux" {
 		wsMux, have := wsMuxMap[remote]
