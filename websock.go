@@ -145,7 +145,7 @@ func newWSMux(addr string) *wsMux {
 func (m *wsMux) NewClient(r *http.Request) *wsMuxClient {
 	m.bufMux.Lock()
 	defer m.bufMux.Unlock()
-	ret := &wsMuxClient{mux: m, reqNum: r.Context().Value("request-num").(uint64)}
+	ret := &wsMuxClient{mux: m, reqNum: r.Context().Value(requestNumberContext).(uint64)}
 	m.readBuffers[ret.reqNum] = make(chan []byte, 1)
 	return ret
 }
@@ -315,7 +315,7 @@ func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFr
 			if idx := bytes.Index(data, []byte("\r\n")); idx == -1 {
 				logf(r, logLevelWarning, "Inject request nr header set(%#v), but no \\r\\n in incoming data: %#v", injectRequestNrHeader, string(data))
 			} else {
-				data = bytes.Join([][]byte{data[:idx], []byte(fmt.Sprintf("\r\n%s: %v", injectRequestNrHeader, r.Context().Value("request-num"))), data[idx:]}, []byte{})
+				data = bytes.Join([][]byte{data[:idx], []byte(fmt.Sprintf("\r\n%s: %v", injectRequestNrHeader, r.Context().Value(requestNumberContext))), data[idx:]}, []byte{})
 			}
 			injectRequestNrHeader = ""
 		}
@@ -433,7 +433,7 @@ func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	if rl := r.Context().Value(remoteLoggerContext); rl != nil {
 		_ = rl.(*RemoteLogger).log("ws-connected", map[string]interface{}{
-			"RequestNum": r.Context().Value("request-num"),
+			"RequestNum": r.Context().Value(requestNumberContext),
 			"LocalAddr":  conn.LocalAddr().String(),
 			"RemoteAddr": conn.RemoteAddr().String(),
 			"Protocol":   wsh.proto,

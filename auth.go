@@ -382,7 +382,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		if findRoleCount == 0 {
 			if rl := r.Context().Value(remoteLoggerContext); rl != nil {
 				_ = rl.(*RemoteLogger).log("auth-ok", map[string]interface{}{
-					"RequestNum": r.Context().Value("request-num"),
+					"RequestNum": r.Context().Value(requestNumberContext),
 					"Roles":      haveRoles,
 				})
 			}

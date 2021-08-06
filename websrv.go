@@ -37,6 +37,7 @@ type contextKey int
 const (
 	authRoleContext contextKey = iota
 	remoteLoggerContext
+	requestNumberContext
 )
 
 type arrayFlag []string
