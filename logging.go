@@ -170,7 +170,6 @@ type tlsInfoLogMessage struct {
 	CipherSuite      uint16
 	ServerName       string `json:",omitempty"`
 	PeerCertificates [][]byte
-	TLSUnique        []byte
 }
 
 func (l LoggedListener) Accept() (net.Conn, error) {
@@ -183,7 +182,7 @@ func (l LoggedListener) Accept() (net.Conn, error) {
 			}{err.Error()}
 		} else {
 			cs := tlsConn.ConnectionState()
-			tlsInfo = &tlsInfoLogMessage{cs.Version, cs.DidResume, cs.CipherSuite, cs.ServerName, [][]byte{}, cs.TLSUnique}
+			tlsInfo = &tlsInfoLogMessage{cs.Version, cs.DidResume, cs.CipherSuite, cs.ServerName, [][]byte{}}
 			for _, v := range cs.PeerCertificates {
 				tlsInfo.(*tlsInfoLogMessage).PeerCertificates = append(tlsInfo.(*tlsInfoLogMessage).PeerCertificates, v.Raw)
 			}

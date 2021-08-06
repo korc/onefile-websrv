@@ -120,7 +120,7 @@ func main() {
 
 	currentLogLevel = logLevelInfo
 	for ll, lstr := range logLevelStr {
-		if strings.ToLower(lstr) == strings.ToLower(*loglevelFlag) {
+		if strings.EqualFold(lstr, *loglevelFlag) {
 			currentLogLevel = ll
 		}
 	}

@@ -42,8 +42,6 @@ func handleTestSocket(l net.Listener) {
 			defer conn.Close()
 			if n, err := conn.Write([]byte(testHello)); err != nil {
 				log.Fatalf("Could not write hello %#v[%d]: %s", testHello, n, err)
-			} else {
-				//log.Printf("Wrote hello: %#v", testHello)
 			}
 			buf := make([]byte, testReadBufLen)
 			if n, err := conn.Read(buf); err != nil && err != io.EOF {
@@ -317,7 +315,7 @@ func TestWebSocket(t *testing.T) {
 			return
 		}
 		t.Logf("X-Req-Nr reply: %#v", string(reply))
-		if bytes.Index(reply, []byte("X-Req-Nr")) == -1 {
+		if !bytes.Contains(reply, []byte("X-Req-Nr")) {
 			t.Errorf("X-Req-Nr not found in reply: %#v", string(reply))
 		}
 	})
