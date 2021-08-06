@@ -303,4 +303,128 @@ func TestWebSocket(t *testing.T) {
 			t.Errorf("X-Req-Nr not found in reply: %#v", string(reply))
 		}
 	})
+
+	t.Run("mux", func(t *testing.T) {
+		srvMux := &http.ServeMux{}
+		srvMux.Handle("/a", newWebSocketHandler("mux:123"))
+		srvMux.Handle("/b", newWebSocketHandler("mux:456"))
+		srv := httptest.NewServer(&HTTPLogger{DefaultHandler: srvMux})
+		defer srv.Close()
+
+		urlA := "ws" + srv.URL[4:] + "/a"
+		urlB := "ws" + srv.URL[4:] + "/b"
+
+		connA1, _, err := grlws.DefaultDialer.Dial(urlA, nil)
+		if err != nil {
+			t.Errorf("Cannot dial client1 to %s: %s", urlA, err)
+			return
+		}
+		defer connA1.Close()
+		connA2, _, err := grlws.DefaultDialer.Dial(urlA, nil)
+		if err != nil {
+			t.Errorf("Cannot dial client2 to %s: %s", urlA, err)
+			return
+		}
+		defer connA2.Close()
+		connA3, _, err := grlws.DefaultDialer.Dial(urlA, nil)
+		if err != nil {
+			t.Errorf("Cannot dial client2 to %s: %s", urlA, err)
+			return
+		}
+		defer connA3.Close()
+
+		connB1, _, err := grlws.DefaultDialer.Dial(urlB, nil)
+		if err != nil {
+			t.Errorf("Cannot dial client1 to %s: %s", urlB, err)
+			return
+		}
+		defer connB1.Close()
+		connB2, _, err := grlws.DefaultDialer.Dial(urlB, nil)
+		if err != nil {
+			t.Errorf("Cannot dial client2 to %s: %s", urlB, err)
+			return
+		}
+		defer connB2.Close()
+
+		testA := []byte("This is a test")
+		testB := []byte("This is another test")
+		testA2 := []byte("Some more tests")
+		t.Run("write", func(t *testing.T) {
+			t.Run("A", func(t *testing.T) {
+				if err := connA1.WriteMessage(grlws.BinaryMessage, testA); err != nil {
+					t.Errorf("Cannot write testA: %s", err)
+					return
+				}
+			})
+			t.Run("B", func(t *testing.T) {
+				if err := connB1.WriteMessage(grlws.BinaryMessage, testB); err != nil {
+					t.Errorf("Cannot write testB: %s", err)
+					return
+				}
+			})
+			t.Run("A2", func(t *testing.T) {
+				if err := connA2.WriteMessage(grlws.BinaryMessage, testA2); err != nil {
+					t.Errorf("Cannot write testA2: %s", err)
+					return
+				}
+			})
+		})
+		t.Run("read A", func(t *testing.T) {
+			t.Run("C2", func(t *testing.T) {
+				_, connAbuf2, err := connA2.ReadMessage()
+				if err != nil {
+					t.Errorf("Error reading message A2: %s", err)
+					return
+				}
+				if !bytes.Equal(connAbuf2, testA) {
+					t.Errorf("Answer A2 (%#v) is not testA (%#v)", connAbuf2, testA)
+					return
+				}
+			})
+			t.Run("C3", func(t *testing.T) {
+				_, connAbuf3, err := connA3.ReadMessage()
+				if err != nil {
+					t.Errorf("Error reading message A3: %s", err)
+					return
+				}
+				if !bytes.Equal(connAbuf3, testA) {
+					t.Errorf("Answer A3 (%#v) is not testA (%#v)", connAbuf3, testA)
+					return
+				}
+				t.Run("A2", func(t *testing.T) {
+					_, connAbuf3_2, err := connA3.ReadMessage()
+					if err != nil {
+						t.Errorf("Error reading message A3(2): %s", err)
+						return
+					}
+					if !bytes.Equal(connAbuf3_2, testA2) {
+						t.Errorf("Answer A3(2) (%#v) is not testA2 (%#v)", connAbuf3_2, testA2)
+						return
+					}
+				})
+			})
+		})
+		t.Run("read B", func(t *testing.T) {
+			_, connBbuf2, err := connB2.ReadMessage()
+			if err != nil {
+				t.Errorf("Error reading message B2: %s", err)
+				return
+			}
+			if !bytes.Equal(connBbuf2, testB) {
+				t.Errorf("Answer B2 (%#v) is not testB (%#v)", connBbuf2, testB)
+				return
+			}
+		})
+		t.Run("read A2C1", func(t *testing.T) {
+			_, connAbuf1, err := connA1.ReadMessage()
+			if err != nil {
+				t.Errorf("Error reading message A1: %s", err)
+				return
+			}
+			if !bytes.Equal(connAbuf1, testA2) {
+				t.Errorf("Answer A1 (%#v) is not testA2 (%#v)", connAbuf1, testA2)
+				return
+			}
+		})
+	})
 }

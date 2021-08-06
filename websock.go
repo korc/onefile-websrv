@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -115,6 +116,88 @@ type webSocketHandler struct {
 	injectRequestNrHeader string
 }
 
+type wsMux struct {
+	addr        string
+	readBuffers map[uint64]chan []byte
+	bufMux      *sync.Mutex
+}
+
+type wsMuxClient struct {
+	mux    *wsMux
+	reqNum uint64
+}
+
+type wsMuxClientAddr struct{ addr string }
+
+func (wsMuxClientAddr) Network() string   { return "ws-mux" }
+func (a *wsMuxClientAddr) String() string { return a.addr }
+
+func newWSMux(addr string) *wsMux {
+	return &wsMux{
+		addr:        addr,
+		readBuffers: make(map[uint64]chan []byte),
+		bufMux:      &sync.Mutex{},
+	}
+}
+
+func (m *wsMux) NewClient(r *http.Request) *wsMuxClient {
+	m.bufMux.Lock()
+	defer m.bufMux.Unlock()
+	ret := &wsMuxClient{mux: m, reqNum: r.Context().Value("request-num").(uint64)}
+	m.readBuffers[ret.reqNum] = make(chan []byte, 1)
+	return ret
+}
+
+func (m *wsMuxClient) Close() error {
+	m.mux.bufMux.Lock()
+	defer m.mux.bufMux.Unlock()
+	close(m.mux.readBuffers[m.reqNum])
+	delete(m.mux.readBuffers, m.reqNum)
+	return nil
+}
+
+func (m *wsMuxClient) LocalAddr() net.Addr {
+	return &wsMuxClientAddr{m.mux.addr}
+}
+
+func (m *wsMuxClient) RemoteAddr() net.Addr {
+	return &wsMuxClientAddr{fmt.Sprintf("%s[%d]", m.mux.addr, m.reqNum)}
+}
+
+func (m *wsMuxClient) Read(b []byte) (n int, err error) {
+	d := <-m.mux.readBuffers[m.reqNum]
+	if d == nil {
+		return 0, io.EOF
+	}
+	m.mux.bufMux.Lock()
+	defer m.mux.bufMux.Unlock()
+	n = copy(b, d)
+	if n < len(d) {
+		m.mux.readBuffers[m.reqNum] <- d[n:]
+	}
+	return n, err
+}
+
+func (m *wsMuxClient) Write(b []byte) (n int, err error) {
+	m.mux.bufMux.Lock()
+	defer m.mux.bufMux.Unlock()
+	for reqNum := range m.mux.readBuffers {
+		if reqNum == m.reqNum {
+			continue
+		}
+		m.mux.readBuffers[reqNum] <- b
+	}
+	return len(b), nil
+}
+
+var ErrNotImplemented = errors.New("not implemented")
+
+func (m *wsMuxClient) SetDeadline(time.Time) error      { return ErrNotImplemented }
+func (m *wsMuxClient) SetReadDeadline(time.Time) error  { return ErrNotImplemented }
+func (m *wsMuxClient) SetWriteDeadline(time.Time) error { return ErrNotImplemented }
+
+var wsMuxMap = make(map[string]*wsMux)
+
 func newWebSocketHandler(params string) *webSocketHandler {
 	wsh := &webSocketHandler{
 		readTimeout: 60 * time.Second,
@@ -132,13 +215,16 @@ func newWebSocketHandler(params string) *webSocketHandler {
 
 func (wsh *webSocketHandler) chooseProtoAddr(handlerParams string) *webSocketHandler {
 	address := handlerParams
-	if address[:5] == "unix:" {
+	if strings.HasPrefix(address, "unix:") {
 		wsh.proto = "unix"
 		address = address[5:]
-	} else if address[:1] == "/" || address[:1] == "@" {
+	} else if strings.HasPrefix(address, "mux:") {
+		wsh.proto = "mux"
+		address = address[4:]
+	} else if strings.HasPrefix(address, "/") || strings.HasPrefix(address, "@") {
 		wsh.proto = "unix"
 	}
-	if address[:4] == "tls:" {
+	if strings.HasPrefix(address, "tls:") {
 		if wsh.tlsConfig == nil {
 			wsh.tlsConfig = &tls.Config{}
 		}
@@ -151,7 +237,7 @@ func (wsh *webSocketHandler) chooseProtoAddr(handlerParams string) *webSocketHan
 	return wsh
 }
 
-func (wsh *webSocketHandler) dialRemote() (conn net.Conn, err error) {
+func (wsh *webSocketHandler) dialRemote(r *http.Request) (conn net.Conn, err error) {
 	if strings.HasPrefix(wsh.address, "exec:") {
 		execString := wsh.address[5:]
 		shCmd := wsh.connectParams["sh"]
@@ -164,6 +250,13 @@ func (wsh *webSocketHandler) dialRemote() (conn net.Conn, err error) {
 		}
 		shArgs = append(shArgs, execString)
 		return newExecConn(shCmd, shArgs...)
+	} else if wsh.proto == "mux" {
+		wsMux, have := wsMuxMap[wsh.address]
+		if !have {
+			wsMux = newWSMux(wsh.address)
+			wsMuxMap[wsh.address] = wsMux
+		}
+		return wsMux.NewClient(r), nil
 	}
 	if wsh.tlsConfig != nil {
 		return tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, wsh.proto, wsh.address, wsh.tlsConfig)
@@ -313,7 +406,7 @@ func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer c.Close()
-	conn, err := wsh.dialRemote()
+	conn, err := wsh.dialRemote(r)
 	if err != nil {
 		logf(r, logLevelError, "Cannot connect to %#v: %s", wsh.address, err)
 		return
