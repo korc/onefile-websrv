@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,6 +115,7 @@ type webSocketHandler struct {
 	tlsConfig             *tls.Config
 	messageType           int
 	injectRequestNrHeader string
+	pathRegExp            *regexp.Regexp
 }
 
 type wsMux struct {
@@ -210,6 +212,9 @@ func newWebSocketHandler(params string) *webSocketHandler {
 		wsh.messageType = websocket.TextMessage
 	}
 	wsh.injectRequestNrHeader = wsh.connectParams["injReqNrHdr"]
+	if pathPat, ok := wsh.connectParams["re"]; ok {
+		wsh.pathRegExp = regexp.MustCompile(pathPat)
+	}
 	return wsh
 }
 
@@ -220,6 +225,12 @@ func (wsh *webSocketHandler) chooseProtoAddr(handlerParams string) *webSocketHan
 		address = address[5:]
 	} else if strings.HasPrefix(address, "mux:") {
 		wsh.proto = "mux"
+		address = address[4:]
+	} else if strings.HasPrefix(address, "exec:") {
+		wsh.proto = "exec"
+		address = address[5:]
+	} else if strings.HasPrefix(address, "tcp:") {
+		wsh.proto = "tcp"
 		address = address[4:]
 	} else if strings.HasPrefix(address, "/") || strings.HasPrefix(address, "@") {
 		wsh.proto = "unix"
@@ -238,8 +249,12 @@ func (wsh *webSocketHandler) chooseProtoAddr(handlerParams string) *webSocketHan
 }
 
 func (wsh *webSocketHandler) dialRemote(r *http.Request) (conn net.Conn, err error) {
-	if strings.HasPrefix(wsh.address, "exec:") {
-		execString := wsh.address[5:]
+	remote := wsh.address
+	if wsh.pathRegExp != nil {
+		idx := wsh.pathRegExp.FindStringSubmatchIndex(r.URL.Path)
+		remote = string(wsh.pathRegExp.ExpandString([]byte{}, remote, r.URL.Path, idx))
+	}
+	if wsh.proto == "exec" {
 		shCmd := wsh.connectParams["sh"]
 		if shCmd == "" {
 			shCmd = "/bin/sh"
@@ -248,20 +263,20 @@ func (wsh *webSocketHandler) dialRemote(r *http.Request) (conn net.Conn, err err
 		if _, ok := wsh.connectParams["no-c"]; !ok {
 			shArgs = append(shArgs, "-c")
 		}
-		shArgs = append(shArgs, execString)
+		shArgs = append(shArgs, remote)
 		return newExecConn(shCmd, shArgs...)
 	} else if wsh.proto == "mux" {
-		wsMux, have := wsMuxMap[wsh.address]
+		wsMux, have := wsMuxMap[remote]
 		if !have {
-			wsMux = newWSMux(wsh.address)
-			wsMuxMap[wsh.address] = wsMux
+			wsMux = newWSMux(remote)
+			wsMuxMap[remote] = wsMux
 		}
 		return wsMux.NewClient(r), nil
 	}
 	if wsh.tlsConfig != nil {
-		return tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, wsh.proto, wsh.address, wsh.tlsConfig)
+		return tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, wsh.proto, remote, wsh.tlsConfig)
 	}
-	return net.DialTimeout(wsh.proto, wsh.address, 10*time.Second)
+	return net.DialTimeout(wsh.proto, remote, 10*time.Second)
 }
 
 func (wsh *webSocketHandler) setReadTimeout(d time.Duration) *webSocketHandler {

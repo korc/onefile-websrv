@@ -305,10 +305,7 @@ func TestWebSocket(t *testing.T) {
 	})
 
 	t.Run("mux", func(t *testing.T) {
-		srvMux := &http.ServeMux{}
-		srvMux.Handle("/a", newWebSocketHandler("mux:123"))
-		srvMux.Handle("/b", newWebSocketHandler("mux:456"))
-		srv := httptest.NewServer(&HTTPLogger{DefaultHandler: srvMux})
+		srv := httptest.NewServer(&HTTPLogger{DefaultHandler: newWebSocketHandler("{re=/(.*)}mux:$1")})
 		defer srv.Close()
 
 		urlA := "ws" + srv.URL[4:] + "/a"
@@ -377,7 +374,7 @@ func TestWebSocket(t *testing.T) {
 					return
 				}
 				if !bytes.Equal(connAbuf2, testA) {
-					t.Errorf("Answer A2 (%#v) is not testA (%#v)", connAbuf2, testA)
+					t.Errorf("Answer A2 (%#v) is not testA (%#v)", string(connAbuf2), string(testA))
 					return
 				}
 			})
@@ -388,7 +385,7 @@ func TestWebSocket(t *testing.T) {
 					return
 				}
 				if !bytes.Equal(connAbuf3, testA) {
-					t.Errorf("Answer A3 (%#v) is not testA (%#v)", connAbuf3, testA)
+					t.Errorf("Answer A3 (%#v) is not testA (%#v)", string(connAbuf3), string(testA))
 					return
 				}
 				t.Run("A2", func(t *testing.T) {
@@ -398,7 +395,7 @@ func TestWebSocket(t *testing.T) {
 						return
 					}
 					if !bytes.Equal(connAbuf3_2, testA2) {
-						t.Errorf("Answer A3(2) (%#v) is not testA2 (%#v)", connAbuf3_2, testA2)
+						t.Errorf("Answer A3(2) (%#v) is not testA2 (%#v)", string(connAbuf3_2), string(testA2))
 						return
 					}
 				})
@@ -411,7 +408,7 @@ func TestWebSocket(t *testing.T) {
 				return
 			}
 			if !bytes.Equal(connBbuf2, testB) {
-				t.Errorf("Answer B2 (%#v) is not testB (%#v)", connBbuf2, testB)
+				t.Errorf("Answer B2 (%#v) is not testB (%#v)", string(connBbuf2), string(testB))
 				return
 			}
 		})
@@ -422,7 +419,7 @@ func TestWebSocket(t *testing.T) {
 				return
 			}
 			if !bytes.Equal(connAbuf1, testA2) {
-				t.Errorf("Answer A1 (%#v) is not testA2 (%#v)", connAbuf1, testA2)
+				t.Errorf("Answer A1 (%#v) is not testA2 (%#v)", string(connAbuf1), string(testA2))
 				return
 			}
 		})

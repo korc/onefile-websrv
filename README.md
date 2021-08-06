@@ -110,8 +110,10 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
   - `websocket` (alias `ws`)
     - connects a websocket to TCP or UNIX socket
     - `params` can be be
-      - prefixed with `{type=text}` to change default message type to text
-      - `HOST:PORT` to connection via TCP to _HOST:PORT_
+      - prefixed with
+        - `{type=text}` to change default message type to text
+        - `{re=REGEXP}` to match grouped params like `$1` in address from request URL path with regexp
+      - `HOST:PORT` or `tcp:HOST:PORT` to connection via TCP to _HOST:PORT_
       - `tls:HOST:PORT` to connect using TLS over TCP
       - `unix:/PATH/SOCKET` for UNIX socket
       - `exec:COMMAND` to run COMMAND using `sh -c`
