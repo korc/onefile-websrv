@@ -167,7 +167,8 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
       - `file:` in the beginning of `auth` will load CA certificate from file
     - `CertKeyHash`
        `auth` is hex-encoded SHA256 hash of client certificate's public key (SHA256 of ASN1 from `ssh-keygen -e -m pkcs8` and `certtool --pubkey-info`)
-       `file:` prefix makes keys to be loaded from specified file containing either PUBLIC KEY or CERTIFICATE data in PEM format
+       `file:` prefix make keys to be loaded from specified file instead
+         - can read OpenSSH `authorized_keys` with `ssh-rsa` keys, and PEM files with `PUBLIC KEY` or `CERTIFICATE` data
     - `JWTSecret`
       - checks if JWT from `Authentication: Bearer` header is signed by specific authority
       - `auth` contains authority's shared secret

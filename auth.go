@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -20,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt"
+	"golang.org/x/crypto/ssh"
 )
 
 // ACLRecord maps path regexp to required roles
@@ -45,7 +48,50 @@ var (
 	authEnvDef      = regexp.MustCompile(`\$\{[a-zA-Z0-9_]+\}`)
 	jwtParamDetect  = regexp.MustCompile(`^\{` + jwtParams + `(?:,` + jwtParams + `)*\}`)
 	jwtParamExtract = regexp.MustCompile(jwtParams)
+
+	sshKeyRe = regexp.MustCompile("(ssh-rsa)[[:space:]]+([^[:space:]]+)")
 )
+
+func sshKeysToPEM(in []byte) (out []byte) {
+	out = make([]byte, 0)
+	for st := 0; st >= 0 && st < len(in); {
+		i := bytes.IndexByte(in[st:], '\n')
+		if i < 0 {
+			out = append(out, in[st:]...)
+			break
+		}
+		line := in[st : st+i]
+		st = st + i + 1
+		if match := sshKeyRe.FindSubmatch(line); match != nil {
+			keyData, err := base64.StdEncoding.DecodeString(string(match[2]))
+			if err != nil {
+				logf(nil, logLevelFatal, "Cannot b64decode SSH key data: %s", err)
+			}
+			typeStrLen := binary.BigEndian.Uint32(keyData)
+			if typeString := keyData[4 : 4+typeStrLen]; !bytes.Equal(typeString, match[1]) {
+				logf(nil, logLevelWarning, "wrong key type: %v != %v", string(typeString), string(match[1]))
+				continue
+			}
+			var keyStruct struct {
+				E    *big.Int
+				N    *big.Int
+				Rest []byte `ssh:"rest"`
+			}
+			if err := ssh.Unmarshal(keyData[4+typeStrLen:], &keyStruct); err != nil {
+				logf(nil, logLevelFatal, "could not parse rsa key structure: %s", err)
+			}
+			pubKey := &rsa.PublicKey{E: int(keyStruct.E.Int64()), N: keyStruct.N}
+			pemBytes, err := x509.MarshalPKIXPublicKey(pubKey)
+			if err != nil {
+				logf(nil, logLevelFatal, "could not marshal key: %s", err)
+			}
+			out = append(out, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Headers: map[string]string{}, Bytes: pemBytes})...)
+		} else {
+			out = append(append(out, line...), '\n')
+		}
+	}
+	return
+}
 
 // AddAuth : add authentication method to identify role(s)
 func (ah *AuthHandler) AddAuth(method, check, name string) {
@@ -70,6 +116,9 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 				logf(nil, logLevelFatal, "Cannot read file %#v: %s", fileName, err)
 			}
 			nrDone := 0
+			if len(data) > 0 {
+				data = sshKeysToPEM(data)
+			}
 			for len(data) > 0 {
 				var pemBlock *pem.Block
 				pemBlock, data = pem.Decode(data)
