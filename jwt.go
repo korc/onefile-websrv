@@ -39,7 +39,7 @@ func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				if req.TLS.PeerCertificates == nil || len(req.TLS.PeerCertificates) == 0 {
 					logf(req, logLevelError, "JWT wants to set %#v from X509 %s, but there are no client certificate", key, vstr[4:])
 					w.WriteHeader(http.StatusBadRequest)
-					continue
+					return
 				}
 				crt := req.TLS.PeerCertificates[0]
 				switch vstr[4:] {
@@ -57,6 +57,9 @@ func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 					logf(req, logLevelWarning, "crt param %#v not in: cn, subj, fp, crt", vstr[4:])
 				}
 			} else if strings.HasPrefix(vstr, "q:") {
+				if !req.URL.Query().Has(vstr[2:]) {
+					continue
+				}
 				val = req.URL.Query().Get(vstr[2:])
 			} else if strings.HasPrefix(vstr, "post:") {
 				val = req.PostFormValue(vstr[5:])
