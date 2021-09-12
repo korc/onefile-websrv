@@ -94,50 +94,98 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 
 ### URL path mapping
 
-- `-map` option can be used to map URL's to different handlers
-- multiple arguments on command-line will add more mappings
-- each mapping has relative URL `path` and `handler` part, with optional `parameters` for each handler type
-  - optionally prefix `path` with a host name for "virtual hosts"
-- `handler` parameter values:
-  - `file`
-    - simple file-based static webserver
-    - `params` is a filesystem directory path
-    - empty `params` means "current directory"
-  - `webdav`
-    - webdav handler file downloads/uploads
-    - make sure you use proper authetication
-    - `params` is a filesystem directory path
-  - `websocket` (alias `ws`)
-    - connects a websocket to TCP or UNIX socket
-    - `params` can be be
-      - prefixed with
-        - `{type=text}` to change default message type to text
-        - `{re=REGEXP}` to match grouped params like `$1` in address from request URL path with regexp
-      - `HOST:PORT` or `tcp:HOST:PORT` to connection via TCP to _HOST:PORT_
-      - `tls:HOST:PORT` to connect using TLS over TCP
-      - `unix:/PATH/SOCKET` for UNIX socket
-      - `exec:COMMAND` to run COMMAND using `sh -c`
-        - prefix `{sh=SHELL}` for alternate shell
-        - prefix `{no-c=1}` for no `-c` option after shell command
-        - prefix `{sep=SEPARATOR}` to split string after `exec:` into arguments with _SEPARATOR_
-      - `mux:ID` to share a websocket with other clients connected to the same `ID`
-  - `http`
-    - pass-thru proxy, full URL starting with `http:`, `https:` or `unix:`
-    - `params` is a full URL of backend web server
-      - supports webserver at unix socket in the format of `unix:///path/to/unix-socket:/urlpath`
-    - `params` can be prefixed with comma-separated connection options between `{` and `}`
-      - `cert` and `key` options to specify `https`-type backend client's cert/key files 
-      - `fp-hdr`, `cn-hdr`, `subj-hdr` and `cert-hdr` options forward client-sent certificate SHA256 fingerprint,
-       subject's CN attribute, subject's DN string or hex-encoded certificate to backend in specified HTTP header
-  - `debug`
-    - client request debugging
-    - shows also client certificate hash, which can be used for `-auth` option's `Cert` method
-  - `cgi`
-    - Run a CGI script specified by `params`.
-    - Before program name, can specify environment and args with `{` `}`
-      - Example: `{AAAA,BBBB=123,arg:--dir,arg:/var/www}/usr/lib/cgi/program`
-        - `AAAA` will be copied from host env, `BBBB` will be set to `123`, program will be executed with 2 arguments:
-         `--dir` and `/var/www`
+- `-map` option in `hostname/path=handler:params` format can be used to map different paths to different handlers
+  - optional `hostname` can be used for virtual hosting, empty value for all hosts
+- additional `-map` entries add more mappings
+- supported `handler` types:
+  - `file:` statically serve files from directory specified in `params`, or current working directory if empty
+  - `webdav:` WebDAV handler for directory `params`, or memory-only storage if empty
+  - `websocket:` (alias `ws`) connects a websocket to TCP or UNIX socket
+  - `http:` pass request to HTTP backend
+  - `debug:` client request debug
+  - `cgi:` Run a CGI script specified by `params`.
+  - `jwt:` generate JWT token
+
+#### WebSocket handler
+
+- `params` contains target where websocket is connected to
+  - `HOST:PORT` or `tcp:HOST:PORT` to connection via TCP to _HOST:PORT_
+  - `tls:HOST:PORT` to connect using TLS over TCP
+  - `unix:/PATH/SOCKET` for UNIX socket
+  - `exec:COMMAND` to run COMMAND using `sh -c`
+    - prefix `{sh=SHELL}` for alternate shell
+    - prefix `{no-c=1}` for no `-c` option after shell command
+    - prefix `{sep=SEPARATOR}` to split string after `exec:` into arguments with _SEPARATOR_
+  - `mux:ID` to share a websocket with other clients connected to the same `ID`
+- supported options before path in `{...}`
+  - `type=text` to change default message type to text
+  - `re=REGEXP` to match grouped params like `$1` in address from request URL path with regexp
+
+#### HTTP handler
+
+- `params` must be complete URL starting with `http:`, `https:` or `unix:`
+- supports unix sockets in the format of `unix:///path/to/unix-socket:/urlpath`
+- comma-separated options between `{...}` before URL:
+  - `cert` and `key` options to set TLS backend client certificate and key files
+  - forward client certificate data to backend in specified HTTP header:
+    - `fp-hdr` SHA256 fingerprint
+    - `cn-hdr` subject CN attribute
+    - `subj-hdr` subject in text form
+    -  `cert-hdr` hex-encoded client certificate
+
+#### Debug handler
+
+Includes client certificate hash, which can be used for `-auth` option's `Cert` method
+
+#### CGI handler
+
+Before program name, can specify environment and args with `{` `}`
+
+##### Examples
+
+- `{AAAA,BBBB=123,arg:--dir,arg:/var/www}/usr/lib/cgi/program`
+  - `AAAA` will be copied from host env, `BBBB` will be set to `123`, program will be executed with 2 arguments: `--dir` and `/var/www`
+
+#### JWT handler
+
+- secret source specified by `params`
+- source can be prefixed with `file:` to read source from file, or `env:` to read from environment variable
+- following comma-separated options can prefixed with `{...}` before source
+  - `b64=1` decode secret from base64
+  - `alg={ES256|ES384|ES512|RS256|RS384|RS512|PS256|PS384|PS512|HS256|HS384|HS512}` generation algorithm
+    - default algorithm is `HS256`
+    - `RS*` and `PS*` source must be PEM-encoded RSA private key (PKCS#1)
+    - `ES*` source is EC-DSA key
+  - `<key>=<value>`: set `key` in the issued claim to `value`
+    - if `key` ends with `_claim`, that is removed
+    - `value` can be value string, or prefixed with following:
+      - `str:` plain string following `str:`
+      - `crt:` client certificate data
+        - `cn` subject common name
+        - `subj` full subject
+        - `fp` certificate sha256 fingerprint
+        - `crt` base64-encoded certificate
+      - `q:` URL query value
+      - `post:` POST form value
+      - `hdr:` HTTP request header
+      - `env:` server environment variable
+      - `req:` a value from request parameter
+        - `raddr` client remote address (with port number)
+        - `rip` client remote IP
+        - `host` requested Host
+      - `ts:` unix timestamp value
+        - basic format is `+duration` or `-duration` to add or substract from current time
+        - can prefix duration with
+          - `today` to make relation based on start of the day in server localtime
+          - `q:` get duration relative to issue time from URL query
+    - `exp` is by default set to `ts:+5m`, use `exp=` with empty value to explicitly disable JWT expiration
+
+##### Examples:
+
+- `-map /acl/get=jwt:{b64=1,exp=ts:+1h,aud=q:target,nbf=ts:q:nbf}bXktc2VjcmV0`
+  - HS256 signed with shared secret `my-secret`, 1 hour expiration, audience from `target` query parameter, valid-from time from `nbf` query parameter (default=time of request)
+- `-map /login=jwt:{exp=ts:today+25h,sub=crt:cn,alg=ES256}file:jwt.key`
+  - signed with EC-DSA key in `jwt.key`, `sub` in claims from client's x509 certifiate subject `CN` attribute, expiring on next day at 1am
 
 ### Access control
 

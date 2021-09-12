@@ -423,6 +423,8 @@ func main() {
 				handlerParams = handlerParams[ebIndex+1:]
 			}
 			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPathNoHost, "/"), Env: env, InheritEnv: inhEnv, Args: args})
+		case "jwt":
+			http.Handle(urlPath, newJWTHandler(handlerParams))
 		default:
 			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http cgi", urlHandler[:handlerTypeIdx])
 		}
