@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt"
@@ -225,23 +224,6 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 				ah.Auths[jwtCheckLoc][jwtCheckParam] = method + ":" + check
 			}
 		}
-	case "File":
-		options, check := parseCurlyParams(check)
-		if rePath, have := options["re-path"]; have {
-			re, err := regexp.Compile(check)
-			if err != nil {
-				logf(nil, logLevelFatal, "Cannot compile %#v as regular expression: ", err)
-			}
-			if !subgroupMatchRe.MatchString(rePath) {
-				logf(nil, logLevelFatal, "re-path option does not contain any $<nr> subgroup references")
-			}
-			authReCache[check] = re
-		}
-		if nfStr, have := options["nofile"]; have {
-			if _, err := strconv.ParseBool(nfStr); err != nil {
-				logf(nil, logLevelFatal, "nofile parameter is not boolean")
-			}
-		}
 	case "Basic", "IPRange":
 	default:
 		if creator, have := authMethods[method]; have {
@@ -251,7 +233,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 			}
 			ah.Authenticators = append(ah.Authenticators, authn)
 		} else {
-			available := []string{"File", "Basic", "Cert", "CertBy", "CertKeyHash", "JWTSecret", "JWTFilePat", "IPRange"}
+			available := []string{"Basic", "Cert", "CertBy", "CertKeyHash", "JWTSecret", "JWTFilePat", "IPRange"}
 			for m := range authMethods {
 				available = append(available, m)
 			}
@@ -356,61 +338,6 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 			}
 			if ipNet.Contains(remoteHost) {
 				for _, gotRole := range strings.Split(ah.Auths["IPRange"][ipRange], "+") {
-					haveRoles[gotRole] = ah.ACLs == nil
-				}
-			}
-		}
-	}
-
-	if fileChecks, ok := ah.Auths["File"]; ok {
-		allUrlRoles := make(map[string]bool)
-		for rolePlus := range neededRoles {
-			for _, role := range strings.Split(rolePlus, "+") {
-				allUrlRoles[role] = true
-			}
-		}
-
-		for fileCheck, roles := range fileChecks {
-			rolesList := strings.Split(roles, "+")
-			needCheck := ah.ACLs == nil
-			for _, role := range rolesList {
-				if _, have := allUrlRoles[role]; have {
-					needCheck = true
-					break
-				}
-			}
-			if !needCheck {
-				continue
-			}
-			options, filePath := parseCurlyParams(fileCheck)
-			if rePath, ok := options["re-path"]; ok {
-				match := authReCache[filePath].FindStringSubmatch(r.URL.Path)
-				if match == nil {
-					continue
-				}
-				grpNumErr := 0
-				filePath = subgroupMatchRe.ReplaceAllStringFunc(rePath, func(s string) string {
-					grp, _ := strconv.ParseInt(s[1:], 10, 0)
-					if int(grp) >= len(match) {
-						grpNumErr = int(grp)
-						return s
-					}
-					return match[grp]
-				})
-				if grpNumErr > 0 {
-					logf(r, logLevelError, "Filepath ACL regexp match %#v for %#v does not enough groups: %#v", match, roles, grpNumErr)
-					continue
-				}
-			}
-			noFile := false
-			if nfStr, have := options["nofile"]; have {
-				if nfBool, _ := strconv.ParseBool(nfStr); nfBool {
-					noFile = true
-				}
-			}
-			_, statErr := os.Stat(filePath)
-			if (statErr == nil && !noFile) || (noFile && statErr != nil && os.IsNotExist(statErr)) {
-				for _, gotRole := range rolesList {
 					haveRoles[gotRole] = ah.ACLs == nil
 				}
 			}
