@@ -28,18 +28,26 @@ import (
 
 // ACLRecord maps path regexp to required roles
 type ACLRecord struct {
-	Expr     *regexp.Regexp
-	Roles    map[string]bool
-	Methods  map[string]bool
-	Hosts    map[string]bool
-	MatchURI bool
+	Expr         *regexp.Regexp
+	Roles        map[string]bool
+	RolesToCheck map[string]interface{}
+	Methods      map[string]bool
+	Hosts        map[string]bool
+	MatchURI     bool
 }
+
+type Authenticator interface {
+	GetRoles(req *http.Request, rolesToCheck map[string]interface{}) ([]string, error)
+}
+
+type AuthNFactory func(check string, roles []string) (Authenticator, error)
 
 // AuthHandler passes request to next http.Handler if authorization allows
 type AuthHandler struct {
 	http.Handler
 	DefaultHandler http.Handler
 	Auths          map[string]map[string]string
+	Authenticators []Authenticator
 	ACLs           []ACLRecord
 }
 
@@ -54,7 +62,13 @@ var (
 	sshKeyRe = regexp.MustCompile("(ssh-rsa)[[:space:]]+([^[:space:]]+)")
 
 	authReCache = make(map[string]*regexp.Regexp)
+
+	authMethods = make(map[string]AuthNFactory)
 )
+
+func addAuthMethod(name string, authFactory AuthNFactory) {
+	authMethods[name] = authFactory
+}
 
 func sshKeysToPEM(in []byte) (out []byte) {
 	out = make([]byte, 0)
@@ -101,6 +115,10 @@ func sshKeysToPEM(in []byte) (out []byte) {
 func (ah *AuthHandler) AddAuth(method, check, name string) {
 	if ah.Auths == nil {
 		ah.Auths = make(map[string]map[string]string)
+	}
+
+	if ah.Authenticators == nil {
+		ah.Authenticators = make([]Authenticator, 0)
 	}
 
 	check = authEnvDef.ReplaceAllStringFunc(check, func(s string) string {
@@ -226,7 +244,19 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 		}
 	case "Basic", "IPRange":
 	default:
-		logf(nil, logLevelFatal, "Supported mechanisms: File, Basic, Cert, CertBy, CertKeyHash, JWTSecret, JWTFilePat, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
+		if creator, have := authMethods[method]; have {
+			authn, err := creator(check, strings.Split(name, "+"))
+			if err != nil {
+				logf(nil, logLevelFatal, "Could not create %s authenticator for %s: %s", check, name, err)
+			}
+			ah.Authenticators = append(ah.Authenticators, authn)
+		} else {
+			available := []string{"File", "Basic", "Cert", "CertBy", "CertKeyHash", "JWTSecret", "JWTFilePat", "IPRange"}
+			for m := range authMethods {
+				available = append(available, m)
+			}
+			logf(nil, logLevelFatal, "Supported mechanisms: %s. Basic auth is base64 string, certs can use file:<file.crt>", strings.Join(available, ", "))
+		}
 	}
 	if ah.Auths[method] == nil {
 		ah.Auths[method] = make(map[string]string)
@@ -267,9 +297,12 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	if ah.ACLs == nil {
 		ah.ACLs = make([]ACLRecord, 0)
 	}
-	rec := ACLRecord{re, make(map[string]bool), methods, hosts, matchURI}
+	rec := ACLRecord{re, make(map[string]bool), make(map[string]interface{}), methods, hosts, matchURI}
 	for _, r := range roles {
 		rec.Roles[r] = true
+		for _, singleRole := range strings.Split(r, "+") {
+			rec.RolesToCheck[singleRole] = true
+		}
 	}
 	ah.ACLs = append(ah.ACLs, rec)
 	return nil
@@ -281,6 +314,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	}
 
 	neededRoles := make(map[string]bool)
+	var rolesToCheck map[string]interface{}
 	for _, acl := range ah.ACLs {
 		methodMatch := true
 		hostMatch := true
@@ -300,6 +334,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		}
 		if methodMatch && hostMatch && acl.Expr.MatchString(testString) {
 			neededRoles = acl.Roles
+			rolesToCheck = acl.RolesToCheck
 			break
 		}
 	}
@@ -478,6 +513,17 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 					}
 				}
 			}
+		}
+	}
+
+	for _, authn := range ah.Authenticators {
+		addRoles, err := authn.GetRoles(r, rolesToCheck)
+		if err != nil {
+			logf(r, logLevelError, "Could not authenticate with %#v: %s", authn, err)
+			return r, err
+		}
+		for _, role := range addRoles {
+			haveRoles[role] = ah.ACLs == nil
 		}
 	}
 
