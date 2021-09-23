@@ -146,7 +146,9 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 	options, args := parseCurlyParams(params)
 	signingSource := []byte(args)
 	handler = &jwtHandler{options: options, claims: map[string]string{"exp": "ts:+5m"}}
-	if strings.HasPrefix(args, "file:") {
+	if strings.HasPrefix(args, "str:") {
+		signingSource = []byte(os.Getenv(args[4:]))
+	} else if strings.HasPrefix(args, "file:") {
 		var err error
 		signingSource, err = os.ReadFile(args[5:])
 		if err != nil {

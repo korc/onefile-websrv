@@ -73,7 +73,9 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 		jwtHeader: options["header"],
 	}
 	signingSource := []byte(jwtKey)
-	if strings.HasPrefix(jwtKey, "file:") {
+	if strings.HasPrefix(jwtKey, "str:") {
+		signingSource = []byte(os.Getenv(jwtKey[4:]))
+	} else if strings.HasPrefix(jwtKey, "file:") {
 		signingSource, err = os.ReadFile(jwtKey[5:])
 		if err != nil {
 			logf(nil, logLevelFatal, "Cannot read JWT data: %s", err)
