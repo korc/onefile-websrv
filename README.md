@@ -217,7 +217,17 @@ Before program name, can specify environment and args with `{` `}`
        `auth` is hex-encoded SHA256 hash of client certificate's public key (SHA256 of ASN1 from `ssh-keygen -e -m pkcs8` and `certtool --pubkey-info`)
        `file:` prefix make keys to be loaded from specified file instead
          - can read OpenSSH `authorized_keys` with `ssh-rsa` keys, and PEM files with `PUBLIC KEY` or `CERTIFICATE` data
-    - `JWTSecret`
+    - `JWT`
+      - `auth` value is RSA or ECDSA private or public key in PEM format, unless `{hs=1}` option is given
+        - use `env:<varname>` or `file:<filename>` to read value from environment or file
+      - `{..}` options values
+        - `query=<name>`, `cookie=<name>`, `header=<name>` look for JWT token from those places as well, in addition to `Authentication: Bearer ...` header
+        - `hs=1` use `auth` value as secret key for HMAC signature
+        - `b64=1` decode `auth` value with base64
+        - `aud=<type>:<value>` or `aud=path` - determine what is going to be checked for `aud` "*Audience*" claim
+          - `type` and `value` use same syntax as claim string values in [JWT handler](#jwt-handler) (no `ts:` timestamp).
+        - `aud-re=<regexp>` aud value (`path` by default, can be overwritten by `aud=`) will be matched against regexp, if subgroups found then first group will be used as value
+    - `JWTSecret` *DEPRECATED* in favor of `JWT`
       - checks if JWT from `Authentication: Bearer` header is signed by specific authority
       - `auth` contains authority's shared secret
       - can prefix `auth` with `{cookie|header|query=XXX}` to additionally look JWT token from specified cookie, header or query parameter named `XXX`. multiple locations have to be separated with comma.
@@ -225,7 +235,7 @@ Before program name, can specify environment and args with `{` `}`
     - `IPRange`
       - checks client's remote IP
       - `auth` is IP address with network mask length in format of `ip/masklen`
-    - `JWTFilePat`
+    - `JWTFilePat` *DEPRECATED*
       - `auth` specifies file (pattern) containing accepted JWT tokens signed with:
         - secrets, in format of `hash:url-base64-encoded-secret`
         - RSA public keys, in format of `rsa:base64-encoded-n-value`
