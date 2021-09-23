@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -64,6 +65,47 @@ func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 	return
 }
 
+func parseJWTKeyString(keyString string) (data []byte, err error) {
+	data = []byte(keyString)
+	if strings.HasPrefix(keyString, "str:") {
+		data = []byte(os.Getenv(keyString[4:]))
+	} else if strings.HasPrefix(keyString, "file:") {
+		data, err = os.ReadFile(keyString[5:])
+		if err != nil {
+			return
+		}
+	} else if strings.HasPrefix(keyString, "env:") {
+		if s, ok := os.LookupEnv(keyString[4:]); ok {
+			data = []byte(s)
+		} else {
+			return nil, ErrNoEnvVar
+		}
+	}
+	return
+}
+
+var ErrNoPEMKey = errors.New("no RSA/EC/PUBLIC PEM data found")
+var ErrNoEnvVar = errors.New("environment variable not set")
+
+func parsePEMKey(data []byte) (key interface{}, err error) {
+	var block *pem.Block
+	for len(data) > 0 {
+		block, data = pem.Decode(data)
+		if block == nil {
+			return nil, ErrNoPEMKey
+		}
+		switch block.Type {
+		case "RSA PRIVATE KEY":
+			return x509.ParsePKCS1PrivateKey(block.Bytes)
+		case "EC PRIVATE KEY":
+			return x509.ParseECPrivateKey(block.Bytes)
+		case "PUBLIC KEY":
+			return x509.ParsePKIXPublicKey(block.Bytes)
+		}
+	}
+	return
+}
+
 func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, err error) {
 	options, jwtKey := parseCurlyParams(check)
 	jka = &JWTAuthenticator{
@@ -72,16 +114,10 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 		jwtQuery:  options["query"],
 		jwtHeader: options["header"],
 	}
-	signingSource := []byte(jwtKey)
-	if strings.HasPrefix(jwtKey, "str:") {
-		signingSource = []byte(os.Getenv(jwtKey[4:]))
-	} else if strings.HasPrefix(jwtKey, "file:") {
-		signingSource, err = os.ReadFile(jwtKey[5:])
-		if err != nil {
-			logf(nil, logLevelFatal, "Cannot read JWT data: %s", err)
-		}
-	} else if strings.HasPrefix(jwtKey, "env:") {
-		signingSource = []byte(os.Getenv(jwtKey[4:]))
+
+	signingSource, err := parseJWTKeyString(jwtKey)
+	if err != nil {
+		logf(nil, logLevelFatal, "Cannot read JWT data from %s: %s", jwtKey, err)
 	}
 	if v, _ := strconv.ParseBool(options["b64"]); v {
 		dstBuf := make([]byte, base64.StdEncoding.DecodedLen(len(signingSource)))
@@ -91,28 +127,14 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 			signingSource = dstBuf[:n]
 		}
 	}
+
 	if v, _ := strconv.ParseBool(options["hs"]); v {
 		jka.key = signingSource
 		jka.isSecret = true
 	} else {
-		var block *pem.Block
-		for len(signingSource) > 0 {
-			block, signingSource = pem.Decode(signingSource)
-			if block == nil {
-				logf(nil, logLevelFatal, "could not read PEM key from %#v, use {hs=1} for HMAC signatures", jwtKey)
-				return
-			}
-			switch block.Type {
-			case "RSA PRIVATE KEY":
-				jka.key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-				return
-			case "EC PRIVATE KEY":
-				jka.key, err = x509.ParseECPrivateKey(block.Bytes)
-				return
-			case "PUBLIC KEY":
-				jka.key, err = x509.ParsePKIXPublicKey(block.Bytes)
-				return
-			}
+		jka.key, err = parsePEMKey(signingSource)
+		if err != nil {
+			logf(nil, logLevelFatal, "could not read PEM key from %#v, use {hs=1} for HMAC signatures: %s", jwtKey, err)
 		}
 	}
 	return
