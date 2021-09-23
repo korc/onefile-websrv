@@ -337,7 +337,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 
 		for fileCheck, roles := range fileChecks {
 			rolesList := strings.Split(roles, "+")
-			needCheck := false
+			needCheck := ah.ACLs == nil
 			for _, role := range rolesList {
 				if _, have := allUrlRoles[role]; have {
 					needCheck = true
