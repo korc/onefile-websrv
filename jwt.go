@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -23,62 +24,117 @@ type jwtHandler struct {
 	claims  map[string]string
 }
 
+var ErrCantSolve = errors.New("impossible to solve claim value")
+var ErrWontSet = errors.New("conditions make it skip the claim")
+var ErrNoPEMKey = errors.New("no RSA/EC/PUBLIC PEM data found")
+var ErrNoEnvVar = errors.New("environment variable not set")
+
+func parsePEMKey(data []byte) (key interface{}, err error) {
+	var block *pem.Block
+	for len(data) > 0 {
+		block, data = pem.Decode(data)
+		if block == nil {
+			return nil, ErrNoPEMKey
+		}
+		switch block.Type {
+		case "RSA PRIVATE KEY":
+			return x509.ParsePKCS1PrivateKey(block.Bytes)
+		case "EC PRIVATE KEY":
+			return x509.ParseECPrivateKey(block.Bytes)
+		case "PUBLIC KEY":
+			return x509.ParsePKIXPublicKey(block.Bytes)
+		}
+	}
+	return
+}
+
+func parseJWTKeyString(keyString string) (data []byte, err error) {
+	data = []byte(keyString)
+	if strings.HasPrefix(keyString, "str:") {
+		data = []byte(os.Getenv(keyString[4:]))
+	} else if strings.HasPrefix(keyString, "file:") {
+		data, err = os.ReadFile(keyString[5:])
+		if err != nil {
+			return
+		}
+	} else if strings.HasPrefix(keyString, "env:") {
+		if s, ok := os.LookupEnv(keyString[4:]); ok {
+			data = []byte(s)
+		} else {
+			return nil, ErrNoEnvVar
+		}
+	}
+	return
+}
+
+func solveClaimStringValue(vstr string, req *http.Request) (string, bool, error) {
+	if strings.HasPrefix(vstr, "str:") {
+		return vstr[4:], true, nil
+	} else if strings.HasPrefix(vstr, "crt:") {
+		if req.TLS == nil {
+			logf(req, logLevelError, "JWT wants X509 info from non-TLS request")
+			return "", false, ErrCantSolve
+		}
+		if req.TLS.PeerCertificates == nil || len(req.TLS.PeerCertificates) == 0 {
+			logf(req, logLevelError, "want set claim from X509 %s, but there are no client certificate", vstr[4:])
+			return "", false, ErrCantSolve
+		}
+		crt := req.TLS.PeerCertificates[0]
+		switch vstr[4:] {
+		case "cn":
+			return crt.Subject.CommonName, true, nil
+		case "subj":
+			return crt.Subject.String(), true, nil
+		case "fp":
+			h := sha256.New()
+			h.Write(crt.Raw)
+			return hex.EncodeToString(h.Sum(nil)), true, nil
+		case "crt":
+			return base64.StdEncoding.EncodeToString(crt.Raw), true, nil
+		default:
+			logf(req, logLevelWarning, "crt param %#v not in: cn, subj, fp, crt", vstr[4:])
+		}
+	} else if strings.HasPrefix(vstr, "q:") {
+		if !req.URL.Query().Has(vstr[2:]) {
+			return "", false, ErrWontSet
+		}
+		return req.URL.Query().Get(vstr[2:]), true, nil
+	} else if strings.HasPrefix(vstr, "post:") {
+		return req.PostFormValue(vstr[5:]), true, nil
+	} else if strings.HasPrefix(vstr, "hdr:") {
+		return req.Header.Get(vstr[4:]), true, nil
+	} else if strings.HasPrefix(vstr, "env:") {
+		return os.Getenv(vstr[4:]), true, nil
+	} else if strings.HasPrefix(vstr, "req:") {
+		switch vstr[4:] {
+		case "raddr":
+			return req.RemoteAddr, true, nil
+		case "rip":
+			val, _, _ := net.SplitHostPort(req.RemoteAddr)
+			return val, true, nil
+		case "host":
+			return req.Host, true, nil
+		default:
+			logf(req, logLevelWarning, "req param %#v not in: host, rip, raddr", vstr[4:])
+			return "", false, ErrWontSet
+		}
+	}
+	return "", false, nil
+}
+
 func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	claims := make(jwt.MapClaims)
 	if j.claims != nil {
 		for key, vstr := range j.claims {
 			var val interface{} = vstr
-			if strings.HasPrefix(vstr, "str:") {
-				val = vstr[4:]
-			} else if strings.HasPrefix(vstr, "crt:") {
-				if req.TLS == nil {
-					logf(req, logLevelError, "JWT wants X509 info from non-TLS request")
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				if req.TLS.PeerCertificates == nil || len(req.TLS.PeerCertificates) == 0 {
-					logf(req, logLevelError, "JWT wants to set %#v from X509 %s, but there are no client certificate", key, vstr[4:])
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				crt := req.TLS.PeerCertificates[0]
-				switch vstr[4:] {
-				case "cn":
-					val = crt.Subject.CommonName
-				case "subj":
-					val = crt.Subject.String()
-				case "fp":
-					h := sha256.New()
-					h.Write(crt.Raw)
-					val = hex.EncodeToString(h.Sum(nil))
-				case "crt":
-					val = base64.StdEncoding.EncodeToString(crt.Raw)
-				default:
-					logf(req, logLevelWarning, "crt param %#v not in: cn, subj, fp, crt", vstr[4:])
-				}
-			} else if strings.HasPrefix(vstr, "q:") {
-				if !req.URL.Query().Has(vstr[2:]) {
+			if newVal, solved, err := solveClaimStringValue(vstr, req); solved {
+				val = newVal
+			} else if err != nil {
+				if err == ErrWontSet {
 					continue
 				}
-				val = req.URL.Query().Get(vstr[2:])
-			} else if strings.HasPrefix(vstr, "post:") {
-				val = req.PostFormValue(vstr[5:])
-			} else if strings.HasPrefix(vstr, "hdr:") {
-				val = req.Header.Get(vstr[4:])
-			} else if strings.HasPrefix(vstr, "env:") {
-				val = os.Getenv(vstr[4:])
-			} else if strings.HasPrefix(vstr, "req:") {
-				switch vstr[4:] {
-				case "raddr":
-					val = req.RemoteAddr
-				case "rip":
-					val, _, _ = net.SplitHostPort(req.RemoteAddr)
-				case "host":
-					val = req.Host
-				default:
-					logf(req, logLevelWarning, "req param %#v not in: host, rip, raddr", vstr[4:])
-					continue
-				}
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			} else if strings.HasPrefix(vstr, "ts:") {
 				vstr = vstr[3:]
 				st := time.Now()
