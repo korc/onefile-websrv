@@ -60,8 +60,6 @@ var (
 
 	sshKeyRe = regexp.MustCompile("(ssh-rsa)[[:space:]]+([^[:space:]]+)")
 
-	authReCache = make(map[string]*regexp.Regexp)
-
 	authMethods = make(map[string]AuthNFactory)
 )
 
