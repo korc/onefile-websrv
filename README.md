@@ -238,3 +238,10 @@ Before program name, can specify environment and args with `{` `}`
             - `/data/webauth/adm/test.jwt`
             - `/data/webauth/adm.jwt`
         - because of cost associatd checking for `.jwt` files, auth is applied only when path requires authentication
+    - `File`
+      - file existance check
+      - options available with `{..}` prefix:
+        - `nofile` inverse condition, and succeed if file does NOT exist
+        - `re-path` treat auth value as regular expression, and `re-path` as pathname with `$<nr>` subgroup expansion pattern
+          - ex: `-map /=webdav:/data/ -auth nofile=File:{no-file=1,re-path=/data/$1}/(.+) -auth ip4all=IPRange:0.0.0.0/0 -acl {PUT}^/=nofile -acl {GET}^/=ip4all -acl ^/=nobody`
+            - create a WebDAV mapping for `/data/`, where you can upload only new files

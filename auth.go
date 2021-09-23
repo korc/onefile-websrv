@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt"
@@ -48,8 +49,11 @@ var (
 	authEnvDef      = regexp.MustCompile(`\$\{[a-zA-Z0-9_]+\}`)
 	jwtParamDetect  = regexp.MustCompile(`^\{` + jwtParams + `(?:,` + jwtParams + `)*\}`)
 	jwtParamExtract = regexp.MustCompile(jwtParams)
+	subgroupMatchRe = regexp.MustCompile(`\$[0-9]+`)
 
 	sshKeyRe = regexp.MustCompile("(ssh-rsa)[[:space:]]+([^[:space:]]+)")
+
+	authReCache = make(map[string]*regexp.Regexp)
 )
 
 func sshKeysToPEM(in []byte) (out []byte) {
@@ -203,9 +207,26 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 				ah.Auths[jwtCheckLoc][jwtCheckParam] = method + ":" + check
 			}
 		}
+	case "File":
+		options, check := parseCurlyParams(check)
+		if rePath, have := options["re-path"]; have {
+			re, err := regexp.Compile(check)
+			if err != nil {
+				logf(nil, logLevelFatal, "Cannot compile %#v as regular expression: ", err)
+			}
+			if !subgroupMatchRe.MatchString(rePath) {
+				logf(nil, logLevelFatal, "re-path option does not contain any $<nr> subgroup references")
+			}
+			authReCache[check] = re
+		}
+		if nfStr, have := options["nofile"]; have {
+			if _, err := strconv.ParseBool(nfStr); err != nil {
+				logf(nil, logLevelFatal, "nofile parameter is not boolean")
+			}
+		}
 	case "Basic", "IPRange":
 	default:
-		logf(nil, logLevelFatal, "Supported mechanisms: Basic, Cert, CertBy, CertKeyHash, JWTSecret, JWTFilePat, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
+		logf(nil, logLevelFatal, "Supported mechanisms: File, Basic, Cert, CertBy, CertKeyHash, JWTSecret, JWTFilePat, IPRange. Basic auth is base64 string, certs can use file:<file.crt>")
 	}
 	if ah.Auths[method] == nil {
 		ah.Auths[method] = make(map[string]string)
@@ -300,6 +321,61 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 			}
 			if ipNet.Contains(remoteHost) {
 				for _, gotRole := range strings.Split(ah.Auths["IPRange"][ipRange], "+") {
+					haveRoles[gotRole] = ah.ACLs == nil
+				}
+			}
+		}
+	}
+
+	if fileChecks, ok := ah.Auths["File"]; ok {
+		allUrlRoles := make(map[string]bool)
+		for rolePlus := range neededRoles {
+			for _, role := range strings.Split(rolePlus, "+") {
+				allUrlRoles[role] = true
+			}
+		}
+
+		for fileCheck, roles := range fileChecks {
+			rolesList := strings.Split(roles, "+")
+			needCheck := false
+			for _, role := range rolesList {
+				if _, have := allUrlRoles[role]; have {
+					needCheck = true
+					break
+				}
+			}
+			if !needCheck {
+				continue
+			}
+			options, filePath := parseCurlyParams(fileCheck)
+			if rePath, ok := options["re-path"]; ok {
+				match := authReCache[filePath].FindStringSubmatch(r.URL.Path)
+				if match == nil {
+					continue
+				}
+				grpNumErr := 0
+				filePath = subgroupMatchRe.ReplaceAllStringFunc(rePath, func(s string) string {
+					grp, _ := strconv.ParseInt(s[1:], 10, 0)
+					if int(grp) >= len(match) {
+						grpNumErr = int(grp)
+						return s
+					}
+					return match[grp]
+				})
+				if grpNumErr > 0 {
+					logf(r, logLevelError, "Filepath ACL regexp match %#v for %#v does not enough groups: %#v", match, roles, grpNumErr)
+					continue
+				}
+			}
+			noFile := false
+			if nfStr, have := options["nofile"]; have {
+				if nfBool, _ := strconv.ParseBool(nfStr); nfBool {
+					noFile = true
+				}
+			}
+			_, statErr := os.Stat(filePath)
+			if (statErr == nil && !noFile) || (noFile && statErr != nil && os.IsNotExist(statErr)) {
+				for _, gotRole := range rolesList {
 					haveRoles[gotRole] = ah.ACLs == nil
 				}
 			}
