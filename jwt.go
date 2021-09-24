@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,11 +18,17 @@ import (
 	"github.com/golang-jwt/jwt"
 )
 
+type claimRepl struct {
+	re   *regexp.Regexp
+	repl string
+}
+
 type jwtHandler struct {
-	options map[string]string
-	method  jwt.SigningMethod
-	key     interface{}
-	claims  map[string]string
+	options      map[string]string
+	method       jwt.SigningMethod
+	key          interface{}
+	claims       map[string]string
+	claimReplMap map[string]*claimRepl
 }
 
 var ErrCantSolve = errors.New("impossible to solve claim value")
@@ -107,6 +114,8 @@ func solveClaimStringValue(vstr string, req *http.Request) (string, bool, error)
 		return os.Getenv(vstr[4:]), true, nil
 	} else if strings.HasPrefix(vstr, "req:") {
 		switch vstr[4:] {
+		case "path":
+			return req.URL.Path, true, nil
 		case "raddr":
 			return req.RemoteAddr, true, nil
 		case "rip":
@@ -128,7 +137,11 @@ func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		for key, vstr := range j.claims {
 			var val interface{} = vstr
 			if newVal, solved, err := solveClaimStringValue(vstr, req); solved {
-				val = newVal
+				if subst, have := j.claimReplMap[key]; have {
+					val = subst.re.ReplaceAllString(newVal, subst.repl)
+				} else {
+					val = newVal
+				}
 			} else if err != nil {
 				if err == ErrWontSet {
 					continue
@@ -201,7 +214,11 @@ func loadPEMType(pemType string, data []byte) []byte {
 func newJWTHandler(params string) (handler *jwtHandler) {
 	options, args := parseCurlyParams(params)
 	signingSource := []byte(args)
-	handler = &jwtHandler{options: options, claims: map[string]string{"exp": "ts:+5m"}}
+	handler = &jwtHandler{
+		options:      options,
+		claims:       map[string]string{"exp": "ts:+5m"},
+		claimReplMap: make(map[string]*claimRepl),
+	}
 	if strings.HasPrefix(args, "str:") {
 		signingSource = []byte(os.Getenv(args[4:]))
 	} else if strings.HasPrefix(args, "file:") {
@@ -224,6 +241,21 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 			}
 		case "b64", "alg":
 		default:
+			if strings.HasSuffix(opt, "_repl") {
+				parts := strings.Split(val, val[:1])
+				if len(parts) != 4 {
+					logf(nil, logLevelFatal, "claim replacement does not follow ^regexp^repl^ pattern")
+				}
+				if re, err := regexp.Compile(parts[1]); err == nil {
+					handler.claimReplMap[opt[:len(opt)-5]] = &claimRepl{
+						re:   re,
+						repl: parts[2],
+					}
+				} else {
+					logf(nil, logLevelFatal, "cannot compile %#v claim substitution regexp: %#s", opt, err)
+				}
+				continue
+			}
 			if strings.HasSuffix(opt, "_claim") {
 				opt = opt[:len(opt)-6]
 			}

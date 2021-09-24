@@ -158,6 +158,9 @@ Before program name, can specify environment and args with `{` `}`
     - `ES*` source is EC-DSA key
   - `<key>=<value>`: set `key` in the issued claim to `value`
     - if `key` ends with `_claim`, that is removed
+    - if `key` ands with `<claim>_repl`, it must contain sed-like string replacement in `@regex@replacement@` format, which will be applied to the claim `<claim>`
+      - any character be used instead of `@`
+      - ex: `{aud=req:path,aud_repl=@.*/@@}` assigns `aud` to a filename in the path
     - `value` can be value string, or prefixed with following:
       - `str:` plain string following `str:`
       - `crt:` client certificate data
@@ -173,6 +176,7 @@ Before program name, can specify environment and args with `{` `}`
         - `raddr` client remote address (with port number)
         - `rip` client remote IP
         - `host` requested Host
+        - `path` URL path
       - `ts:` unix timestamp value
         - basic format is `+duration` or `-duration` to add or substract from current time
         - can prefix duration with
