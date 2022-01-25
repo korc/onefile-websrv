@@ -334,10 +334,19 @@ func main() {
 				logf(nil, logLevelFatal, "Cannot parse %#v as URL: %v", handlerParams, err)
 			}
 			prxHandler := httputil.NewSingleHostReverseProxy(httpURL)
+			var pathRe *regexp.Regexp
+			if rePat, ok := connectParams["re"]; ok {
+				pathRe = regexp.MustCompile(rePat)
+			}
 
 			defaultDirector := prxHandler.Director
 			prxHandler.Director = func(request *http.Request) {
+				reqPath := request.URL.Path
 				defaultDirector(request)
+				if pathRe != nil {
+					request.URL.Path = string(pathRe.ExpandString([]byte{}, httpURL.Path, reqPath,
+						pathRe.FindStringSubmatchIndex(reqPath)))
+				}
 				for _, hdr := range []string{"fp-hdr", "cn-hdr", "cert-hdr", "subj-hdr"} {
 					if hdrName, ok := connectParams[hdr]; ok {
 						// Scrub possible auth-related headers from request
