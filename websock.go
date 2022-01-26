@@ -308,8 +308,8 @@ func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFr
 			}
 			break
 		}
-		if msgType != wsh.messageType {
-			logf(r, logLevelWarning, "Not message type does not match: %#v != ", msgType, wsh.messageType)
+		if msgType != wsh.messageType && wsh.messageType == websocket.TextMessage {
+			logf(r, logLevelWarning, "Binary message type in text channel: %#v != %#v", msgType, wsh.messageType)
 		}
 		if injectRequestNrHeader != "" {
 			if idx := bytes.Index(data, []byte("\r\n")); idx == -1 {
