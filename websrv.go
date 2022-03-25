@@ -92,7 +92,22 @@ func (u UnixRoundTripper) RoundTrip(request *http.Request) (*http.Response, erro
 	}).RoundTrip(request)
 }
 
+type serverConfig struct {
+	logger serverLogger
+}
+type protocoHandlerCreator func(string, *serverConfig) http.Handler
+
+var protocolHandlers = map[string]protocoHandlerCreator{}
+
+func addProtocolHandler(proto string, createFunc protocoHandlerCreator) error {
+	protocolHandlers[proto] = createFunc
+	return nil
+}
+
 func main() {
+	cfg := &serverConfig{
+		logger: &simpleLogger{currentLevel: logLevelWarning},
+	}
 	var (
 		listenAddr    = flag.String("listen", ":80", "Listen ip:port or /path/to/unix-socket")
 		chroot        = flag.String("chroot", "", "chroot() to directory after start")
@@ -121,7 +136,7 @@ func main() {
 	currentLogLevel = logLevelInfo
 	for ll, lstr := range logLevelStr {
 		if strings.EqualFold(lstr, *loglevelFlag) {
-			currentLogLevel = ll
+			currentLogLevel = logLevel(ll)
 		}
 	}
 
@@ -432,10 +447,18 @@ func main() {
 				handlerParams = handlerParams[ebIndex+1:]
 			}
 			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPathNoHost, "/"), Env: env, InheritEnv: inhEnv, Args: args})
-		case "jwt":
-			http.Handle(urlPath, newJWTHandler(handlerParams))
 		default:
-			logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http cgi", urlHandler[:handlerTypeIdx])
+			if handler, have := protocolHandlers[urlHandler[:handlerTypeIdx]]; have {
+				http.Handle(urlPath, handler(handlerParams, cfg))
+			} else {
+				keys := []string{}
+				for k := range protocolHandlers {
+					keys = append(keys, k)
+				}
+
+				logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http cgi %s",
+					urlHandler[:handlerTypeIdx], strings.Join(keys, ", "))
+			}
 		}
 	}
 

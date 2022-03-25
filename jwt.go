@@ -256,10 +256,7 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 				}
 				continue
 			}
-			if strings.HasSuffix(opt, "_claim") {
-				opt = opt[:len(opt)-6]
-			}
-			handler.claims[opt] = val
+			handler.claims[strings.TrimSuffix(opt, "_claim")] = val
 		}
 	}
 	if v, _ := strconv.ParseBool(options["b64"]); v {
@@ -304,4 +301,11 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 		logf(nil, logLevelFatal, "Unknown key type: %#v", signAlgo)
 	}
 	return
+}
+
+func init() {
+	addProtocolHandler("jwt", func(s string, sc *serverConfig) http.Handler {
+		sc.logger.Log(logLevelDebug, "new JWT handler", map[string]interface{}{"parameters": s})
+		return newJWTHandler(s)
+	})
 }

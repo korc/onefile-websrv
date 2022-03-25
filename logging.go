@@ -15,8 +15,10 @@ import (
 	"time"
 )
 
+type logLevel int
+
 const (
-	logLevelFatal int = iota
+	logLevelFatal logLevel = iota
 	logLevelError
 	logLevelWarning
 	logLevelInfo
@@ -26,6 +28,26 @@ const (
 
 var logLevelStr = []string{"FATAL", "ERROR", "WARNING", "INFO", "VERBOSE", "DEBUG"}
 var currentLogLevel = logLevelDebug
+
+type serverLogger interface {
+	Log(level logLevel, message string, args map[string]interface{})
+	SetLogLevel(level logLevel)
+}
+
+type simpleLogger struct {
+	currentLevel logLevel
+}
+
+func (l *simpleLogger) Log(level logLevel, msg string, args map[string]interface{}) {
+	if level <= l.currentLevel {
+		return
+	}
+	log.Output(2, fmt.Sprintf("[%s]: %s: %v", logLevelStr[level], msg, args))
+}
+
+func (l *simpleLogger) SetLogLevel(level logLevel) {
+	l.currentLevel = level
+}
 
 // HTTPLogger : HTTP handler which logs requests and replies
 type HTTPLogger struct {
@@ -202,7 +224,7 @@ func (l LoggedListener) Accept() (net.Conn, error) {
 	return conn, err
 }
 
-func logf(r *http.Request, level int, format string, args ...interface{}) {
+func logf(r *http.Request, level logLevel, format string, args ...interface{}) {
 	if level > currentLogLevel {
 		return
 	}
