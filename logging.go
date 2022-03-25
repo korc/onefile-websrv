@@ -39,7 +39,7 @@ type simpleLogger struct {
 }
 
 func (l *simpleLogger) Log(level logLevel, msg string, args map[string]interface{}) {
-	if level <= l.currentLevel {
+	if level > l.currentLevel {
 		return
 	}
 	log.Output(2, fmt.Sprintf("[%s]: %s: %v", logLevelStr[level], msg, args))

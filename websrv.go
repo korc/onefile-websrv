@@ -139,6 +139,7 @@ func main() {
 			currentLogLevel = logLevel(ll)
 		}
 	}
+	cfg.logger.SetLogLevel(currentLogLevel)
 
 	if len(urlMaps) == 0 {
 		_ = urlMaps.Set("/=file:")
