@@ -95,7 +95,7 @@ func (u UnixRoundTripper) RoundTrip(request *http.Request) (*http.Response, erro
 type serverConfig struct {
 	logger serverLogger
 }
-type protocoHandlerCreator func(string, *serverConfig) http.Handler
+type protocoHandlerCreator func(urlPath, params string, cfg *serverConfig) http.Handler
 
 var protocolHandlers = map[string]protocoHandlerCreator{}
 
@@ -449,8 +449,8 @@ func main() {
 			}
 			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPathNoHost, "/"), Env: env, InheritEnv: inhEnv, Args: args})
 		default:
-			if handler, have := protocolHandlers[urlHandler[:handlerTypeIdx]]; have {
-				http.Handle(urlPath, handler(handlerParams, cfg))
+			if createHandler, have := protocolHandlers[urlHandler[:handlerTypeIdx]]; have {
+				http.Handle(urlPath, createHandler(urlPath, handlerParams, cfg))
 			} else {
 				keys := []string{}
 				for k := range protocolHandlers {
