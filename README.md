@@ -132,6 +132,9 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
     - `cn-hdr` subject CN attribute
     - `subj-hdr` subject in text form
     -  `cert-hdr` hex-encoded client certificate
+  - `del-hdr=x-header-name:x-header2-name` to remove request header from client
+  - `set-hdr:x-header-name=VALUE` to set a request header
+  - `no-xff=1` to remove X-Forwarded-For header containing client IP
 
 #### Debug handler
 

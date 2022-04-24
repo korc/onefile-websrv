@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 )
@@ -43,6 +44,9 @@ func (l *simpleLogger) Log(level logLevel, msg string, args map[string]interface
 		return
 	}
 	log.Output(2, fmt.Sprintf("[%s]: %s: %v", logLevelStr[level], msg, args))
+	if level == logLevelFatal {
+		os.Exit(1)
+	}
 }
 
 func (l *simpleLogger) SetLogLevel(level logLevel) {
