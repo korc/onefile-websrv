@@ -38,6 +38,20 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 				request.Header.Del(hdrName)
 			}
 		}
+		if delHdrs, have := connectParams["del-hdr"]; have {
+			for _, hdr := range strings.Split(delHdrs, ":") {
+				request.Header.Del(hdr)
+			}
+		}
+		for k := range connectParams {
+			if !strings.HasPrefix(k, "set-hdr:") {
+				continue
+			}
+			request.Header.Set(k[8:], connectParams[k])
+		}
+		if noXFF := connectParams["no-xff"]; noXFF != "" {
+			request.Header["X-Forwarded-For"] = nil
+		}
 		if cfg.certFile != "" {
 			request.Header.Set("X-Forwarded-Proto", "https")
 			if request.TLS != nil {
