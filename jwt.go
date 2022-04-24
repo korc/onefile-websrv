@@ -304,7 +304,7 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 }
 
 func init() {
-	addProtocolHandler("jwt", func(s string, sc *serverConfig) http.Handler {
+	addProtocolHandler("jwt", func(_, s string, sc *serverConfig) http.Handler {
 		sc.logger.Log(logLevelInfo, "new JWT handler", map[string]interface{}{"parameters": s})
 		return newJWTHandler(s)
 	})

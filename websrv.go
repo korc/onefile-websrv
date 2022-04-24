@@ -8,9 +8,7 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,8 +16,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/cgi"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/user"
 	"regexp"
@@ -93,9 +89,10 @@ func (u UnixRoundTripper) RoundTrip(request *http.Request) (*http.Response, erro
 }
 
 type serverConfig struct {
-	logger serverLogger
+	logger   serverLogger
+	certFile string
 }
-type protocoHandlerCreator func(string, *serverConfig) http.Handler
+type protocoHandlerCreator func(urlPath, params string, cfg *serverConfig) http.Handler
 
 var protocolHandlers = map[string]protocoHandlerCreator{}
 
@@ -140,6 +137,7 @@ func main() {
 		}
 	}
 	cfg.logger.SetLogLevel(currentLogLevel)
+	cfg.certFile = *certFile
 
 	if len(urlMaps) == 0 {
 		_ = urlMaps.Set("/=file:")
@@ -343,83 +341,6 @@ func main() {
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket", "ws":
 			http.Handle(urlPath, newWebSocketHandler(handlerParams).setReadTimeout(*wsReadTimeout))
-		case "http":
-			connectParams, handlerParams := parseCurlyParams(handlerParams)
-			httpURL, err := url.Parse(handlerParams)
-			if err != nil {
-				logf(nil, logLevelFatal, "Cannot parse %#v as URL: %v", handlerParams, err)
-			}
-			prxHandler := httputil.NewSingleHostReverseProxy(httpURL)
-			var pathRe *regexp.Regexp
-			if rePat, ok := connectParams["re"]; ok {
-				pathRe = regexp.MustCompile(rePat)
-			}
-
-			defaultDirector := prxHandler.Director
-			prxHandler.Director = func(request *http.Request) {
-				reqPath := request.URL.Path
-				defaultDirector(request)
-				if pathRe != nil {
-					request.URL.Path = string(pathRe.ExpandString([]byte{}, httpURL.Path, reqPath,
-						pathRe.FindStringSubmatchIndex(reqPath)))
-				}
-				for _, hdr := range []string{"fp-hdr", "cn-hdr", "cert-hdr", "subj-hdr"} {
-					if hdrName, ok := connectParams[hdr]; ok {
-						// Scrub possible auth-related headers from request
-						request.Header.Del(hdrName)
-					}
-				}
-				if *certFile != "" {
-					request.Header.Set("X-Forwarded-Proto", "https")
-					if request.TLS != nil {
-						if fpHeader, ok := connectParams["fp-hdr"]; ok {
-							for _, crt := range request.TLS.PeerCertificates {
-								h := sha256.New()
-								h.Write(crt.Raw)
-								request.Header.Add(fpHeader, hex.EncodeToString(h.Sum(nil)))
-							}
-						}
-						if subjHeader, ok := connectParams["subj-hdr"]; ok {
-							for _, crt := range request.TLS.PeerCertificates {
-								request.Header.Add(subjHeader, crt.Subject.String())
-							}
-						}
-						if cnHeader, ok := connectParams["cn-hdr"]; ok {
-							for _, crt := range request.TLS.PeerCertificates {
-								request.Header.Add(cnHeader, crt.Subject.CommonName)
-							}
-						}
-						if crtHdr, ok := connectParams["cert-hdr"]; ok {
-							for _, crt := range request.TLS.PeerCertificates {
-								request.Header.Add(crtHdr, hex.EncodeToString(crt.Raw))
-							}
-						}
-					}
-				} else {
-					request.Header.Set("X-Forwarded-Proto", "http")
-				}
-			}
-
-			if certFile, ok := connectParams["cert"]; ok {
-				keyFile := connectParams["key"]
-				if keyFile == "" {
-					keyFile = certFile
-				}
-				cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-				if err != nil {
-					log.Fatalf("Cannot load cert/key from %#v and %#v: %s", certFile, keyFile, err)
-				}
-				prxHandler.Transport = &http.Transport{
-					TLSClientConfig: &tls.Config{
-						Certificates: []tls.Certificate{cert},
-					},
-				}
-			}
-			if prxHandler.Transport == nil {
-				prxHandler.Transport = http.DefaultTransport.(*http.Transport).Clone()
-			}
-			prxHandler.Transport.(*http.Transport).RegisterProtocol("unix", &UnixRoundTripper{})
-			http.Handle(urlPath, http.StripPrefix(urlPathNoHost, prxHandler))
 		case "cgi":
 			var env, inhEnv, args []string
 			if strings.HasPrefix(handlerParams, "{") {
@@ -449,8 +370,8 @@ func main() {
 			}
 			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPathNoHost, "/"), Env: env, InheritEnv: inhEnv, Args: args})
 		default:
-			if handler, have := protocolHandlers[urlHandler[:handlerTypeIdx]]; have {
-				http.Handle(urlPath, handler(handlerParams, cfg))
+			if createHandler, have := protocolHandlers[urlHandler[:handlerTypeIdx]]; have {
+				http.Handle(urlPath, createHandler(urlPath, handlerParams, cfg))
 			} else {
 				keys := []string{}
 				for k := range protocolHandlers {
