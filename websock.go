@@ -34,6 +34,10 @@ type execConn struct {
 	stderr       io.ReadCloser
 }
 
+type blockReader interface {
+	ReadNext() ([]byte, error)
+}
+
 func (e *execConn) Network() string {
 	return "exec"
 }
@@ -266,8 +270,16 @@ func (wsh *webSocketHandler) sockReader(r *http.Request, conn net.Conn, dataFrom
 	defer onceDone.Do(stopRunning)
 	defer close(dataFromConn)
 	for keepRunning.Load().(bool) {
-		data := make([]byte, 8192)
-		nRead, err := conn.Read(data)
+		var data []byte
+		var nRead int
+		var err error
+		if br, ok := conn.(blockReader); ok {
+			data, err = br.ReadNext()
+			nRead = len(data)
+		} else {
+			data = make([]byte, 8192)
+			nRead, err = conn.Read(data)
+		}
 		if err != nil {
 			if err == io.EOF {
 				logf(r, logLevelVerbose, "Socket EOF")

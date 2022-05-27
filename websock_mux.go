@@ -64,6 +64,14 @@ func (m *wsMuxClient) RemoteAddr() net.Addr {
 	return &wsMuxClientAddr{fmt.Sprintf("%s[%d]", m.mux.addr, m.reqNum)}
 }
 
+func (m *wsMuxClient) ReadNext() (buf []byte, err error) {
+	d := <-m.mux.readBuffers[m.reqNum]
+	if d == nil {
+		return nil, io.EOF
+	}
+	return d, nil
+}
+
 func (m *wsMuxClient) Read(b []byte) (n int, err error) {
 	d := <-m.mux.readBuffers[m.reqNum]
 	if d == nil {
