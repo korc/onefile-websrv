@@ -17,7 +17,7 @@ type wsMux struct {
 	bufMux      *sync.Mutex
 }
 
-type wsMuxClient struct {
+type wsMuxConn struct {
 	mux    *wsMux
 	reqNum uint64
 }
@@ -40,15 +40,15 @@ func getWSMux(addr string) *wsMux {
 	}
 }
 
-func (m *wsMux) NewClient(r *http.Request) *wsMuxClient {
+func (m *wsMux) NewConn(r *http.Request) *wsMuxConn {
 	m.bufMux.Lock()
 	defer m.bufMux.Unlock()
-	ret := &wsMuxClient{mux: m, reqNum: r.Context().Value(requestNumberContext).(uint64)}
+	ret := &wsMuxConn{mux: m, reqNum: r.Context().Value(requestNumberContext).(uint64)}
 	m.readBuffers[ret.reqNum] = make(chan []byte, 1)
 	return ret
 }
 
-func (m *wsMuxClient) Close() error {
+func (m *wsMuxConn) Close() error {
 	m.mux.bufMux.Lock()
 	defer m.mux.bufMux.Unlock()
 	close(m.mux.readBuffers[m.reqNum])
@@ -56,15 +56,15 @@ func (m *wsMuxClient) Close() error {
 	return nil
 }
 
-func (m *wsMuxClient) LocalAddr() net.Addr {
+func (m *wsMuxConn) LocalAddr() net.Addr {
 	return &wsMuxClientAddr{m.mux.addr}
 }
 
-func (m *wsMuxClient) RemoteAddr() net.Addr {
+func (m *wsMuxConn) RemoteAddr() net.Addr {
 	return &wsMuxClientAddr{fmt.Sprintf("%s[%d]", m.mux.addr, m.reqNum)}
 }
 
-func (m *wsMuxClient) ReadNext() (buf []byte, err error) {
+func (m *wsMuxConn) ReadNext() (buf []byte, err error) {
 	d := <-m.mux.readBuffers[m.reqNum]
 	if d == nil {
 		return nil, io.EOF
@@ -72,7 +72,7 @@ func (m *wsMuxClient) ReadNext() (buf []byte, err error) {
 	return d, nil
 }
 
-func (m *wsMuxClient) Read(b []byte) (n int, err error) {
+func (m *wsMuxConn) Read(b []byte) (n int, err error) {
 	d := <-m.mux.readBuffers[m.reqNum]
 	if d == nil {
 		return 0, io.EOF
@@ -86,7 +86,7 @@ func (m *wsMuxClient) Read(b []byte) (n int, err error) {
 	return n, err
 }
 
-func (m *wsMuxClient) Write(b []byte) (n int, err error) {
+func (m *wsMuxConn) Write(b []byte) (n int, err error) {
 	m.mux.bufMux.Lock()
 	defer m.mux.bufMux.Unlock()
 	for reqNum := range m.mux.readBuffers {
@@ -98,6 +98,6 @@ func (m *wsMuxClient) Write(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
-func (m *wsMuxClient) SetDeadline(time.Time) error      { return ErrNotImplemented }
-func (m *wsMuxClient) SetReadDeadline(time.Time) error  { return ErrNotImplemented }
-func (m *wsMuxClient) SetWriteDeadline(time.Time) error { return ErrNotImplemented }
+func (m *wsMuxConn) SetDeadline(time.Time) error      { return ErrNotImplemented }
+func (m *wsMuxConn) SetReadDeadline(time.Time) error  { return ErrNotImplemented }
+func (m *wsMuxConn) SetWriteDeadline(time.Time) error { return ErrNotImplemented }

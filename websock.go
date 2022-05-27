@@ -194,7 +194,7 @@ func (wsh *webSocketHandler) dialRemote(r *http.Request) (conn net.Conn, err err
 		}
 		return newExecConn(shCmd, shArgs...)
 	} else if wsh.proto == "mux" {
-		return getWSMux(remote).NewClient(r), nil
+		return getWSMux(remote).NewConn(r), nil
 	}
 	if wsh.tlsConfig != nil {
 		return tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, wsh.proto, remote, wsh.tlsConfig)
