@@ -439,5 +439,36 @@ func TestWebSocket(t *testing.T) {
 				return
 			}
 		})
+		t.Run("large-binary", func(t *testing.T) {
+			maxSize := 1024 * 1024
+			for curSize := 1; curSize < maxSize; curSize = curSize * 2 {
+				randBuf := make([]byte, curSize)
+				nBytes, err := rand.Read(randBuf)
+				if err != nil || nBytes != curSize {
+					t.Errorf("Cannot fill randBuf: want=%d got=%d, err=%s", curSize, nBytes, err)
+					return
+				}
+				if err := connA1.WriteMessage(grlws.BinaryMessage, randBuf); err != nil {
+					t.Errorf("Error writing rndbuf[%d]: %s", curSize, err)
+					return
+				}
+				msgType, recvBuf, err := connA2.ReadMessage()
+				if err != nil {
+					t.Errorf("Could not read msg[%d]: %s", curSize, err)
+					return
+				}
+				if len(recvBuf) != curSize {
+					t.Errorf("recvBuf length %d does not match randBuf %d", len(recvBuf), curSize)
+					return
+				}
+				for i := 0; i < curSize; i++ {
+					if randBuf[i] != recvBuf[i] {
+						t.Errorf("Receive buf doesn't match randBuf[%d] at %d", curSize, i)
+						return
+					}
+				}
+				t.Logf("Received correct msg type=%d len=%d", msgType, curSize)
+			}
+		})
 	})
 }
