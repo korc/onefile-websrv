@@ -26,8 +26,8 @@ func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, sr
 	log.Printf("Dialing to %s", location)
 	ws, resp, err := websocket.DefaultDialer.Dial(location, headers)
 	if err != nil {
-		log.Print("Could not connect: ", err)
-		if resp.StatusCode == http.StatusBadRequest && exitOnBadStatus {
+		log.Printf("Could not connect: %s (resp=%#v)", err, resp)
+		if (resp == nil || resp.StatusCode == http.StatusBadRequest) && exitOnBadStatus {
 			os.Exit(100)
 		}
 		return err
