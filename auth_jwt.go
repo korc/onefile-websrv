@@ -9,7 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/MicahParks/keyfunc"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 var ErrUknAud = errors.New("unknown audience target")
@@ -25,7 +26,7 @@ type JWTAuthenticator struct {
 	jwtCookie string
 	jwtQuery  string
 	jwtHeader string
-	key       interface{}
+	keyFunc   jwt.Keyfunc
 	isSecret  bool
 	audRe     *regexp.Regexp
 	audTarget string
@@ -56,9 +57,7 @@ func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 
 	for _, src := range sources {
 		tokenString, srcType, srcName := src[0], src[1], src[2]
-		if tkn, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-			return jka.key, nil
-		}); err == nil {
+		if tkn, err := jwt.Parse(tokenString, jka.keyFunc); err == nil {
 			if jka.audTarget != "" {
 				var thisAud string
 				if jka.audTarget == "path" {
@@ -132,7 +131,7 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 
 	signingSource, err := parseJWTKeyString(jwtKey)
 	if err != nil {
-		logf(nil, logLevelFatal, "Cannot read JWT data from %s: %s", jwtKey, err)
+		logf(nil, logLevelFatal, "Cannot read JWT key data from %s: %s", jwtKey, err)
 	}
 	if v, _ := strconv.ParseBool(options["b64"]); v {
 		dstBuf := make([]byte, base64.StdEncoding.DecodedLen(len(signingSource)))
@@ -144,12 +143,29 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 	}
 
 	if v, _ := strconv.ParseBool(options["hs"]); v {
-		jka.key = signingSource
+		jka.keyFunc = func(t *jwt.Token) (interface{}, error) {
+			return signingSource, nil
+		}
 		jka.isSecret = true
-	} else {
-		jka.key, err = parsePEMKey(signingSource)
+	} else if v, _ := strconv.ParseBool(options["jwks"]); v {
+		var jwks *keyfunc.JWKS
+		var err error
+		if strings.HasPrefix(jwtKey, "http:") {
+			jwks, err = keyfunc.Get(jwtKey[5:], keyfunc.Options{})
+		} else {
+			jwks, err = keyfunc.NewJSON(signingSource)
+		}
 		if err != nil {
-			logf(nil, logLevelFatal, "could not read PEM key from %#v, use {hs=1} for HMAC signatures: %s", jwtKey, err)
+			logf(nil, logLevelFatal, "could not read parse JWKS from %s -> %#v: %s", jwtKey, string(signingSource), err)
+		}
+		jka.keyFunc = jwks.Keyfunc
+	} else {
+		key, err := parsePEMKey(signingSource)
+		if err != nil {
+			logf(nil, logLevelFatal, "could not read PEM key from %#v, use {hs=1} for HMAC or {jwks=1} for JWKS: %s", jwtKey, err)
+		}
+		jka.keyFunc = func(t *jwt.Token) (interface{}, error) {
+			return key, nil
 		}
 	}
 	return

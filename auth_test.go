@@ -5,12 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path"
 	"testing"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 func TestAuthHost(t *testing.T) {
@@ -168,6 +169,30 @@ func TestFileWithIPRange(t *testing.T) {
 		})
 	})
 	os.Remove(tmpFileExisting.Name())
+}
+
+func TestJWKAuth(t *testing.T) {
+	jwks1 := `{"keys":[{"alg":"ES256","crv":"P-256","d":"wd7wz78KCVwvbikjHyy2jzyWVXJ8JPyb3u3HOv1Oca0","key_ops":["sign","verify"],"kid":"test","kty":"EC","x":"2N6xSlRBC8XxUikjbKibW4w6sYR-DcsJS7SmGy5tg_s","y":"F6kZrW2hAC4UHsgQC-GRW2npLeZwdP2iujmwIroWBPU"}]}`
+	tkn1 := "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3QiLCJ0eXAiOiJKV1QifQ.eyJyb2xlIjoidGVzdCJ9.O4oVTic6DYKo5HXDfi_KiZWiGoCyKUXKAIbgydqZvE-yAOs5kW2OGz7DT8juaC5CgvRuJ-SKNMJg_ODEfnW_7g"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(jwks1))
+	}))
+	defer srv.Close()
+	h := &AuthHandler{}
+	h.AddAuth("JWT", "{jwks=1}http:"+srv.URL, "jwks")
+	u, _ := url.Parse("/")
+	if req, err := h.checkAuthPass(&http.Request{
+		Header: http.Header{"Authorization": []string{"Bearer " + tkn1}},
+		URL:    u,
+	}); err != nil {
+		t.Errorf("auth failed: %s", err)
+	} else {
+		roles := req.Context().Value(authRoleContext).(map[string]bool)
+		if _, ok := roles["jwks"]; !ok {
+			t.Error("no 'jwks' role")
+		}
+	}
 }
 
 func TestJWTSecretAuth(t *testing.T) {

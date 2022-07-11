@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 type claimRepl struct {
@@ -35,6 +35,7 @@ var ErrCantSolve = errors.New("impossible to solve claim value")
 var ErrWontSet = errors.New("conditions make it skip the claim")
 var ErrNoPEMKey = errors.New("no RSA/EC/PUBLIC PEM data found")
 var ErrNoEnvVar = errors.New("environment variable not set")
+var ErrBadResponse = errors.New("bad HTTP response code")
 
 func parsePEMKey(data []byte) (key interface{}, err error) {
 	var block *pem.Block
