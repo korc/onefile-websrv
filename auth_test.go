@@ -173,7 +173,7 @@ func TestFileWithIPRange(t *testing.T) {
 
 func TestJWKAuth(t *testing.T) {
 	jwks1 := `{"keys":[{"alg":"ES256","crv":"P-256","d":"wd7wz78KCVwvbikjHyy2jzyWVXJ8JPyb3u3HOv1Oca0","key_ops":["sign","verify"],"kid":"test","kty":"EC","x":"2N6xSlRBC8XxUikjbKibW4w6sYR-DcsJS7SmGy5tg_s","y":"F6kZrW2hAC4UHsgQC-GRW2npLeZwdP2iujmwIroWBPU"}]}`
-	tkn1 := "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3QiLCJ0eXAiOiJKV1QifQ.eyJyb2xlIjoidGVzdCJ9.O4oVTic6DYKo5HXDfi_KiZWiGoCyKUXKAIbgydqZvE-yAOs5kW2OGz7DT8juaC5CgvRuJ-SKNMJg_ODEfnW_7g"
+	tkn1 := "eyJhbGciOiJFUzI1NiIsImtpZCI6InRlc3QiLCJ0eXAiOiJKV1QifQ.eyJyb2xlIjoidGVzdCIsImF1ZCI6Inp6eiJ9.dnCN9ctSIdKMmDBgFAfzGnFQJZDD1qfwVG4515vaHqjPVibR0EZqp4kIKQkil0-KAk0p_ayXGi5RKy9QrtZZZg"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(jwks1))
@@ -181,18 +181,42 @@ func TestJWKAuth(t *testing.T) {
 	defer srv.Close()
 	h := &AuthHandler{}
 	h.AddAuth("JWT", "{jwks=1}http:"+srv.URL, "jwks")
-	u, _ := url.Parse("/")
-	if req, err := h.checkAuthPass(&http.Request{
-		Header: http.Header{"Authorization": []string{"Bearer " + tkn1}},
-		URL:    u,
-	}); err != nil {
-		t.Errorf("auth failed: %s", err)
-	} else {
-		roles := req.Context().Value(authRoleContext).(map[string]bool)
-		if _, ok := roles["jwks"]; !ok {
-			t.Error("no 'jwks' role")
+	h.AddAuth("JWT", "{jwks=1,aud-re=/(.+)\\.aaa$}http:"+srv.URL, "jwks-aud")
+	t.Run("no-aud", func(t *testing.T) {
+		u, _ := url.Parse("/")
+		if req, err := h.checkAuthPass(&http.Request{
+			Header: http.Header{"Authorization": []string{"Bearer " + tkn1}},
+			URL:    u,
+		}); err != nil {
+			t.Errorf("auth failed: %s", err)
+		} else {
+			roles := req.Context().Value(authRoleContext).(map[string]bool)
+			if _, ok := roles["jwks"]; !ok {
+				t.Error("no 'jwks' role")
+			}
+			if _, ok := roles["jwks-aud"]; ok {
+				t.Error("should not have 'jwks-aud' role")
+			}
 		}
-	}
+	})
+
+	t.Run("have-aud", func(t *testing.T) {
+		u, _ := url.Parse("/zzz.aaa")
+		if req, err := h.checkAuthPass(&http.Request{
+			Header: http.Header{"Authorization": []string{"Bearer " + tkn1}},
+			URL:    u,
+		}); err != nil {
+			t.Errorf("auth failed: %s", err)
+		} else {
+			roles := req.Context().Value(authRoleContext).(map[string]bool)
+			if _, ok := roles["jwks"]; !ok {
+				t.Error("no 'jwks' role")
+			}
+			if _, ok := roles["jwks-aud"]; !ok {
+				t.Error("should have 'jwks-aud' role")
+			}
+		}
+	})
 }
 
 func TestJWTSecretAuth(t *testing.T) {
