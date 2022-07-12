@@ -84,7 +84,9 @@ func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 				}
 
 				if !tkn.Claims.(jwt.MapClaims).VerifyAudience(thisAud, true) {
-					logf(req, logLevelWarning, "audience check failed: not match %#v = %#v (re=%#v)", jka.audTarget, thisAud, jka.audRe)
+					if os.Getenv("LOG_AUD_CHECK") != "" {
+						logf(req, logLevelWarning, "audience check failed: not match %#v = %#v (re=%#v)", jka.audTarget, thisAud, jka.audRe)
+					}
 					continue
 				}
 			}
