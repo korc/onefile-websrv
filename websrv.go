@@ -206,7 +206,7 @@ func main() {
 	if err != nil {
 		logf(nil, logLevelFatal, "Listen on %#v failed: %s", *listenAddr, err)
 	}
-	logf(nil, logLevelInfo, "Listening on %s", *listenAddr)
+	logf(nil, logLevelInfo, "Listening on %s", ln.Addr().String())
 	if *certFile != "" {
 		var tlsConfig *tls.Config
 		if *acmeHosts == "" {
