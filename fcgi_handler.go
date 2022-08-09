@@ -77,7 +77,7 @@ func (fh *FastCGIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
-	protocolHandlers["fcgi"] = func(_, p string, cfg *serverConfig) http.Handler {
-		return NewFastCGIHandler(p, cfg)
-	}
+	addProtocolHandler("fcgi", func(_, p string, cfg *serverConfig) (http.Handler, error) {
+		return NewFastCGIHandler(p, cfg), nil
+	})
 }

@@ -110,8 +110,8 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 }
 
 func init() {
-	protocolHandlers["http"] = func(urlPath, p string, cfg *serverConfig) http.Handler {
+	addProtocolHandler("http", func(urlPath, p string, cfg *serverConfig) (http.Handler, error) {
 		cfg.logger.Log(logLevelInfo, "new HTTP handler", map[string]interface{}{"path": urlPath, "params": p})
-		return NewHttpHandler(urlPath, p, cfg)
-	}
+		return NewHttpHandler(urlPath, p, cfg), nil
+	})
 }

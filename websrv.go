@@ -92,7 +92,7 @@ type serverConfig struct {
 	logger   serverLogger
 	certFile string
 }
-type protocoHandlerCreator func(urlPath, params string, cfg *serverConfig) http.Handler
+type protocoHandlerCreator func(urlPath, params string, cfg *serverConfig) (http.Handler, error)
 
 var protocolHandlers = map[string]protocoHandlerCreator{}
 
@@ -371,7 +371,11 @@ func main() {
 			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPathNoHost, "/"), Env: env, InheritEnv: inhEnv, Args: args})
 		default:
 			if createHandler, have := protocolHandlers[urlHandler[:handlerTypeIdx]]; have {
-				http.Handle(urlPath, createHandler(urlPath, handlerParams, cfg))
+				handler, err := createHandler(urlPath, handlerParams, cfg)
+				if err != nil {
+					log.Fatalf("could not create protocol handler for %#v: %s", urlHandler[:handlerTypeIdx], err)
+				}
+				http.Handle(urlPath, handler)
 			} else {
 				keys := []string{}
 				for k := range protocolHandlers {
