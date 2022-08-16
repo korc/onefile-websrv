@@ -105,6 +105,7 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
   - `debug:` client request debug
   - `cgi:` Run a CGI script specified by `params`.
   - `jwt:` generate JWT token
+  - `ws-proxy:` WebSocket proxy service, to be used with `ws_proxy`
 
 #### WebSocket handler
 
@@ -135,6 +136,13 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
   - `del-hdr=x-header-name:x-header2-name` to remove request header from client
   - `set-hdr:x-header-name=VALUE` to set a request header
   - `no-xff=1` to remove X-Forwarded-For header containing client IP
+
+#### WebSocket Proxy handler
+
+- `params` is a internal name for this proxy. options:
+  - `{srv=1}` make this a server socket for `ws_proxy` endpoint
+  - `{re=...}` searches URL.Path, and `params` as template for name
+    - ex: `-map /prx/=ws-proxy:{re=^/prx/(.+)}prx-$1`
 
 #### Debug handler
 
