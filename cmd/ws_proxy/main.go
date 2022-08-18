@@ -187,9 +187,17 @@ func main() {
 		log.Printf("WS response: %#v", resp)
 	}
 
+	proto := "tcp"
+	if strings.HasPrefix(connAddr, "unix:") {
+		proto = "unix"
+		connAddr = connAddr[5:]
+	} else if strings.HasPrefix(connAddr, "/") {
+		proto = "unix"
+	}
+
 	clients := &wsClientHandler{
 		ws: ws, clients: make(map[uint32]net.Conn),
-		proto: "tcp", addr: connAddr,
+		proto: proto, addr: connAddr,
 		wsBuf: make(chan []byte, 32),
 	}
 	go clients.toWSLoop()
