@@ -69,6 +69,7 @@ type serverConfig struct {
 type protocoHandlerCreator func(urlPath, params string, cfg *serverConfig) (http.Handler, error)
 
 var protocolHandlers = map[string]protocoHandlerCreator{}
+var customHttpSchemas = make(map[string]func() http.RoundTripper)
 
 func addProtocolHandler(proto string, createFunc protocoHandlerCreator) error {
 	protocolHandlers[proto] = createFunc
@@ -366,7 +367,9 @@ func main() {
 
 	if *reqlog != "" {
 		logTransport := http.DefaultTransport.(*http.Transport).Clone()
-		logTransport.RegisterProtocol("unix", &UnixRoundTripper{})
+		for name, rt := range customHttpSchemas {
+			logTransport.RegisterProtocol(name, rt())
+		}
 		rl = &RemoteLogger{*reqlog, &http.Client{Transport: logTransport}}
 		ln = LoggedListener{ln, rl}
 		_ = rl.log("server-start", struct {

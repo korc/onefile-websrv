@@ -105,7 +105,9 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 	if prxHandler.Transport == nil {
 		prxHandler.Transport = http.DefaultTransport.(*http.Transport).Clone()
 	}
-	prxHandler.Transport.(*http.Transport).RegisterProtocol("unix", &UnixRoundTripper{})
+	for name, rt := range customHttpSchemas {
+		prxHandler.Transport.(*http.Transport).RegisterProtocol(name, rt())
+	}
 	return http.StripPrefix(urlPathNoHost, prxHandler)
 }
 

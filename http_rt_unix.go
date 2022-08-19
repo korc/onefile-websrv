@@ -33,3 +33,7 @@ func (u UnixRoundTripper) RoundTrip(request *http.Request) (*http.Response, erro
 		},
 	}).RoundTrip(request)
 }
+
+func init() {
+	customHttpSchemas["unix"] = func() http.RoundTripper { return &UnixRoundTripper{} }
+}
