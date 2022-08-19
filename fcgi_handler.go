@@ -12,7 +12,7 @@ import (
 type FastCGIHandler struct {
 	dialAddress   string
 	dialNetwork   string
-	fastCGIParams map[string]string
+	fastCGIParams map[string]interface{}
 	cfg           *serverConfig
 }
 
@@ -25,7 +25,15 @@ func NewFastCGIHandler(params string, cfg *serverConfig) *FastCGIHandler {
 		ret.dialNetwork = "tcp"
 	}
 	ret.dialAddress = params
-	ret.fastCGIParams = fcgiParams
+
+	ret.fastCGIParams = map[string]interface{}{}
+	for name, val := range fcgiParams {
+		if strings.HasPrefix(val, "~") {
+			ret.fastCGIParams[name] = NewReSubst(val[1:])
+		} else {
+			ret.fastCGIParams[name] = val
+		}
+	}
 	return ret
 }
 
@@ -53,7 +61,17 @@ func (fh *FastCGIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		params["HTTPS"] = "on"
 	}
 	for k, v := range fh.fastCGIParams {
-		params[k] = v
+		if rs, ok := v.(*ReSubst); ok {
+			params[k] = rs.SubstReq(r)
+		} else if s, ok := v.(string); ok {
+			params[k] = s
+		} else {
+			fh.cfg.logger.Log(logLevelError, "Unknown fcgi param type",
+				map[string]interface{}{"type": fmt.Sprintf("%t", v)})
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("bad config"))
+			return
+		}
 	}
 	resp, err := fcgiClient.Request(params, r.Body)
 	if err != nil {
@@ -63,7 +81,6 @@ func (fh *FastCGIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp.Write(w)
 	for n, v := range resp.Header {
 		for _, vv := range v {
 			w.Header().Add(n, vv)
@@ -72,7 +89,13 @@ func (fh *FastCGIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 
 	if resp.Body != nil {
-		io.Copy(w, resp.Body)
+		if wr, err := io.Copy(w, resp.Body); err != nil {
+			fh.cfg.logger.Log(logLevelWarning, "could not copy fcgi body", map[string]interface{}{
+				"error":  err,
+				"copied": wr,
+			})
+		}
+		resp.Body.Close()
 	}
 }
 
