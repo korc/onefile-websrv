@@ -56,18 +56,18 @@ func (s *wsSink) Close() {
 }
 
 type wsProxyService struct {
-	clients map[uint32]*wsSink
-	server  *wsSink
-	seq     uint32
-	lock    *sync.Mutex
+	clients  map[uint32]*wsSink
+	listener *wsSink
+	seq      uint32
+	lock     *sync.Mutex
 }
 
 func (svc *wsProxyService) Reset() {
 	svc.lock.Lock()
 	defer svc.lock.Unlock()
-	if svc.server != nil {
-		svc.server.Close()
-		svc.server = nil
+	if svc.listener != nil {
+		svc.listener.Close()
+		svc.listener = nil
 	}
 	for _, cl := range svc.clients {
 		cl.Close()
@@ -76,18 +76,18 @@ func (svc *wsProxyService) Reset() {
 	svc.seq = 0
 }
 
-func (svc *wsProxyService) handleServer(ws *websocket.Conn) {
+func (svc *wsProxyService) handleListener(ws *websocket.Conn) {
 	svc.lock.Lock()
-	svc.server = newWSSink(ws, 32)
+	svc.listener = newWSSink(ws, 32)
 	svc.lock.Unlock()
 	for {
 		_, data, err := ws.ReadMessage()
 		if err != nil {
-			log.Printf("ws-srv err: %s", err)
+			log.Printf("ws-listener err: %s", err)
 			break
 		}
 		if len(data) < 4 {
-			log.Printf("ws-srv data too short(%d<4): %#v", len(data), data)
+			log.Printf("ws-listener data too short(%d<4): %#v", len(data), data)
 			break
 		}
 		clientId := binary.LittleEndian.Uint32(data)
@@ -117,7 +117,7 @@ func (svc *wsProxyService) handleClient(ws *websocket.Conn) {
 	svc.clients[clientId] = newWSSink(ws, 4)
 	svc.lock.Unlock()
 	defer ws.Close()
-	svc.server.buf <- map[string]interface{}{"connected": clientId}
+	svc.listener.buf <- map[string]interface{}{"connected": clientId}
 	for {
 		_, data, err := ws.ReadMessage()
 		if err != nil {
@@ -132,7 +132,7 @@ func (svc *wsProxyService) handleClient(ws *websocket.Conn) {
 		msg := make([]byte, 4+len(data))
 		binary.LittleEndian.PutUint32(msg, clientId)
 		copy(msg[4:], data)
-		svc.server.buf <- msg
+		svc.listener.buf <- msg
 	}
 	svc.closeClient(clientId)
 }
@@ -140,10 +140,10 @@ func (svc *wsProxyService) handleClient(ws *websocket.Conn) {
 func (svc *wsProxyService) closeClient(clientId uint32) {
 	svc.lock.Lock()
 	defer svc.lock.Unlock()
-	if svc.server != nil {
+	if svc.listener != nil {
 		msg := make([]byte, 4)
 		binary.LittleEndian.PutUint32(msg, clientId)
-		svc.server.buf <- msg
+		svc.listener.buf <- msg
 	}
 	delete(svc.clients, clientId)
 }
@@ -181,11 +181,11 @@ func (wsprx *wsProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name = string(nameExp)
 	}
 	prxSvc := getWsPrxSvc(name)
-	isServer := wsprx.opts["srv"] != ""
-	if isServer {
+	isListener := wsprx.opts["listener"] != ""
+	if isListener {
 		prxSvc.Reset()
 	} else {
-		if prxSvc.server == nil {
+		if prxSvc.listener == nil {
 			w.WriteHeader(http.StatusBadGateway)
 			wsprx.sc.logger.Log(logLevelWarning, "no ws-prx server connected", map[string]interface{}{"name": name})
 			w.Write([]byte("no server to connect to"))
@@ -207,8 +207,8 @@ func (wsprx *wsProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	if isServer {
-		prxSvc.handleServer(ws)
+	if isListener {
+		prxSvc.handleListener(ws)
 	} else {
 		prxSvc.handleClient(ws)
 	}

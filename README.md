@@ -143,7 +143,7 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
 Goal: passing backend http server to external front-end. External server possibly publicly accessible, backend possibly in the internal network (a'la ngrok).
 
 - front-end web service:
-  `onefile-websrv -map /=http:wsprx://backend -map /.srv=ws-proxy:{srv=1}backend`
+  `onefile-websrv -map /=http:wsprx://backend -map /.srv=ws-proxy:{listener=1}backend`
 - back-end web service:
   `onefile-websrv -map /=file:/data/web/html -listen 127.0.0.1:8000`
 - back-end to front-end connector (from `cmd/ws_proxy`):
@@ -154,7 +154,7 @@ NOTE: If front-end is accessible from public internet, you should additionally p
 #### WebSocket Proxy handler
 
 - `params` is a internal name for this proxy. options:
-  - `{srv=1}` make this a server socket for `ws_proxy` endpoint
+  - `{listener=1}` make this a server socket for `ws_proxy` endpoint
   - `{re=...}` searches URL.Path, and `params` as template for name
     - ex: `-map /prx/=ws-proxy:{re=^/prx/(.+)}prx-$1`
 

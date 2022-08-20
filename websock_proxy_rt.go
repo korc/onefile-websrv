@@ -14,7 +14,7 @@ import (
 type WSProxyRoundTripper struct{}
 
 func (svc *wsProxyService) DialTo() (net.Conn, error) {
-	if svc.server == nil {
+	if svc.listener == nil {
 		return nil, net.ErrClosed
 	}
 	reqConn, conn := net.Pipe()
@@ -23,7 +23,7 @@ func (svc *wsProxyService) DialTo() (net.Conn, error) {
 	clientId := svc.seq
 	svc.clients[clientId] = &wsSink{buf: make(chan interface{}, 4)}
 	svc.lock.Unlock()
-	svc.server.buf <- map[string]interface{}{"connected": clientId}
+	svc.listener.buf <- map[string]interface{}{"connected": clientId}
 	go func() {
 		defer conn.Close()
 		defer svc.closeClient(clientId)
@@ -40,7 +40,7 @@ func (svc *wsProxyService) DialTo() (net.Conn, error) {
 			msg := make([]byte, 4+n)
 			binary.LittleEndian.PutUint32(msg, clientId)
 			copy(msg[4:], data[:n])
-			svc.server.buf <- msg
+			svc.listener.buf <- msg
 		}
 	}()
 	go func(s *wsSink) {
