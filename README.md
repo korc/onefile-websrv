@@ -59,7 +59,7 @@ websrv -h
   -acl value
       [{<methods..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)
   -acmehost string
-      Autocert hostnames (comma-separated), -cert will be cache dir
+      Host names (comma-separated) allowed for automatically issued ([ACME](https://en.wikipedia.org/wiki/Automatic_Certificate_Management_Environment)) certificates, -cert will be cache dir
   -acmehttp string
       Listen address for ACME http-01 challenge (default ":80")
   -auth value
@@ -90,7 +90,7 @@ websrv -h
       URL to log request details to (supports also unix:///dir/unix-socket:/path URLs)
 ```
 
-Options marked with `multi-arg` can be specified multiple times on commandline, and will add to previous configuration. Other options are meant to be set only once.
+Options marked with `multi-arg` can be specified multiple times on command-line, and will add to previous configuration. Other options are meant to be set only once.
 
 ### URL path mapping
 
@@ -125,7 +125,7 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 #### HTTP handler
 
 - `params` must be complete URL starting with `http:`, `https:`, `unix:` or `wsprx:`
-  - `wsprx` is handled by `ws-proxy:` mapped server, hostname component as name of it (details below)
+  - `wsprx` is handled by `ws-proxy:` mapped server, hostname component as name of it (example below)
 - supports unix sockets in the format of `unix:///path/to/unix-socket:/urlpath`
 - comma-separated options between `{...}` before URL:
   - `cert` and `key` options to set TLS backend client certificate and key files
@@ -140,7 +140,7 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 
 #### Example: Using HTTP handler with `wsprx` schema
 
-Goal: passing backend http server to external front-end. External server possibly publicly accessible, backend in the interal network (a'la ngrok).
+Goal: passing backend http server to external front-end. External server possibly publicly accessible, backend possibly in the internal network (a'la ngrok).
 
 - front-end web service:
   `onefile-websrv -map /=http:wsprx://backend -map /.srv=ws-proxy:{srv=1}backend`
@@ -203,7 +203,7 @@ Before program name, can specify environment and args with `{` `}`
         - `host` requested Host
         - `path` URL path
       - `ts:` unix timestamp value
-        - basic format is `+duration` or `-duration` to add or substract from current time
+        - basic format is `+duration` or `-duration` to add or subtract from current time
         - can prefix duration with
           - `today` to make relation based on start of the day in server localtime
           - `q:` get duration relative to issue time from URL query
@@ -214,7 +214,7 @@ Before program name, can specify environment and args with `{` `}`
 - `-map /acl/get=jwt:{b64=1,exp=ts:+1h,aud=q:target,nbf=ts:q:nbf}bXktc2VjcmV0`
   - HS256 signed with shared secret `my-secret`, 1 hour expiration, audience from `target` query parameter, valid-from time from `nbf` query parameter (default=time of request)
 - `-map /login=jwt:{exp=ts:today+25h,sub=crt:cn,alg=ES256}file:jwt.key`
-  - signed with EC-DSA key in `jwt.key`, `sub` in claims from client's x509 certifiate subject `CN` attribute, expiring on next day at 1am
+  - signed with EC-DSA key in `jwt.key`, `sub` in claims from client's x509 certificate subject `CN` attribute, expiring on next day at 1am
 
 ### Access control
 
@@ -276,9 +276,9 @@ Before program name, can specify environment and args with `{` `}`
             - `/data/webauth/adm/test.123.jwt`
             - `/data/webauth/adm/test.jwt`
             - `/data/webauth/adm.jwt`
-        - because of cost associatd checking for `.jwt` files, auth is applied only when path requires authentication
+        - because of cost associated with checking for `.jwt` files, auth is applied only when path requires authentication
     - `File`
-      - file existance check
+      - file existence check
       - options available with `{..}` prefix:
         - `nofile` inverse condition, and succeed if file does NOT exist
         - `re-path` treat auth value as regular expression, and `re-path` as pathname with `$<nr>` subgroup expansion pattern
