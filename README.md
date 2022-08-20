@@ -4,9 +4,15 @@
 
 ### Quick-start examples
 
-#### Serving current directory on port 8080
+#### Serving current directory on port 8080 (Docker version)
 
-(You need [Go](https://golang.org/dl/) to be installed)
+```sh
+docker run --rm -it -v "$PWD:/var/www/html:ro" -p 8080:80 korc/onefile-websrv
+```
+
+#### Serving current directory on port 8080 (Go version)
+
+_Install [Go](https://golang.org/dl/)_
 
 ```sh
 go get -u github.com/korc/onefile-websrv
