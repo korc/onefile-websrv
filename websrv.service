@@ -1,7 +1,13 @@
 [Service]
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_SYS_CHROOT
 User=www-data
-ExecStart=/usr/local/bin/websrv -chroot /data/web -map /=file:/html/ -map /incoming/=webdav:/uploads/ -acl ^/incoming/=user -auth user=Basic:dXNlcjpwYXNzd29yZA==
+Environment="USER_PASS_BASIC=dXNlcjpwYXNzd29yZA=="
+ExecStart=/usr/local/bin/websrv \
+  -chroot /data/web \
+  -map /=file:/html/ \
+  -map /incoming/=webdav:/uploads/ \
+  -acl ^/incoming/=user \
+  -auth user=Basic:$${USER_PASS_BASIC}
 
 [Install]
 WantedBy=multi-user.target

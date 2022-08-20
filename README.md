@@ -40,14 +40,13 @@ docker build -t websrv https://github.com/korc/onefile-websrv.git
 docker run --name websrv -u 33:33 -p 80:8080 -v /data/web:/var/www websrv -listen :8080
 ```
 
-### For more systematic installation
+#### Using with systemd
 
 ```sh
-apt-get install libcap2-bin
-go get -u github.com/korc/onefile-websrv
+go install github.com/korc/onefile-websrv@latest
 install go/bin/onefile-websrv /usr/local/bin/websrv
-install -m 0644 go/src/github.com/korc/onefile-websrv/websrv.service /etc/systemd/system/
-vi /etc/systemd/system/websrv.service
+curl https://raw.githubusercontent.com/korc/onefile-websrv/master/websrv.service | sudo tee /etc/systemd/system/websrv.service
+sudo vi /etc/systemd/system/websrv.service # modify command line options for your needs
 systemctl daemon-reload && systemctl enable websrv && systemctl start websrv
 systemctl status websrv
 ```
