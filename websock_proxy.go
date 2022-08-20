@@ -134,14 +134,18 @@ func (svc *wsProxyService) handleClient(ws *websocket.Conn) {
 		copy(msg[4:], data)
 		svc.server.buf <- msg
 	}
+	svc.closeClient(clientId)
+}
+
+func (svc *wsProxyService) closeClient(clientId uint32) {
+	svc.lock.Lock()
+	defer svc.lock.Unlock()
 	if svc.server != nil {
 		msg := make([]byte, 4)
 		binary.LittleEndian.PutUint32(msg, clientId)
 		svc.server.buf <- msg
 	}
-	svc.lock.Lock()
 	delete(svc.clients, clientId)
-	svc.lock.Unlock()
 }
 
 var wsProxyList = map[string]*wsProxyService{}

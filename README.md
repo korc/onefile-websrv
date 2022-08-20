@@ -124,7 +124,8 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
 
 #### HTTP handler
 
-- `params` must be complete URL starting with `http:`, `https:` or `unix:`
+- `params` must be complete URL starting with `http:`, `https:`, `unix:` or `wsprx:`
+  - `wsprx` is handled by `ws-proxy:` mapped server, hostname component as name of it (details below)
 - supports unix sockets in the format of `unix:///path/to/unix-socket:/urlpath`
 - comma-separated options between `{...}` before URL:
   - `cert` and `key` options to set TLS backend client certificate and key files
@@ -136,6 +137,19 @@ Options marked with `multi-arg` can be specified multiple times on commandline, 
   - `del-hdr=x-header-name:x-header2-name` to remove request header from client
   - `set-hdr:x-header-name=VALUE` to set a request header
   - `no-xff=1` to remove X-Forwarded-For header containing client IP
+
+#### Example: Using HTTP handler with `wsprx` schema
+
+Goal: passing backend http server to external front-end. External server possibly publicly accessible, backend in the interal network (a'la ngrok).
+
+- front-end web service:
+  `onefile-websrv -map /=http:wsprx://backend -map /.srv=ws-proxy:{srv=1}backend`
+- back-end web service:
+  `onefile-websrv -map /=file:/data/web/html -listen 127.0.0.1:8000`
+- back-end to front-end connector (from `cmd/ws_proxy`):
+  `ws_proxy -ws ws://front-end-srv/.srv -connect 127.0.0.1:8000`
+
+NOTE: If front-end is accessible from public internet, you should additionally protect `/.srv` endpoint properly with `-acl` options.
 
 #### WebSocket Proxy handler
 
