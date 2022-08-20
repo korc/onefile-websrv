@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -18,11 +19,12 @@ import (
 var debug = false
 
 type wsClientHandler struct {
-	ws      *websocket.Conn
-	wsBuf   chan []byte
-	proto   string
-	addr    string
-	clients map[uint32]net.Conn
+	ws          *websocket.Conn
+	wsBuf       chan []byte
+	proto       string
+	addr        string
+	clients     map[uint32]net.Conn
+	clientsLock *sync.Mutex
 }
 
 func (h *wsClientHandler) toWSLoop() {
@@ -56,6 +58,12 @@ func (h *wsClientHandler) clientToWS(clientId uint32, conn net.Conn) error {
 			}
 			return err
 		}
+		h.clientsLock.Lock()
+		_, have := h.clients[clientId]
+		h.clientsLock.Unlock()
+		if !have {
+			break
+		}
 		writeBuf := make([]byte, 4+n)
 		binary.LittleEndian.PutUint32(writeBuf, clientId)
 		copy(writeBuf[4:], readBuf)
@@ -68,10 +76,12 @@ func (h *wsClientHandler) clientToWS(clientId uint32, conn net.Conn) error {
 }
 
 func (h *wsClientHandler) writeAll(w io.Writer, b []byte) error {
-	for len(b) > 0 {
+	written := 0
+	for len(b) > written {
 		n, err := w.Write(b)
+		written += n
 		if err != nil {
-			log.Printf("Could not write all bytes to conn: %s", err)
+			log.Printf("Could not write all bytes (%d/%d) to conn: %s", written, len(b), err)
 			return err
 		}
 		b = b[n:]
@@ -90,7 +100,9 @@ func (h *wsClientHandler) addClient(clientId uint32) (conn net.Conn, err error) 
 		log.Printf("Could not connect to %s %s: %s", h.proto, h.addr, err)
 		h.closeClient(clientId)
 	}
+	h.clientsLock.Lock()
 	h.clients[clientId] = conn
+	h.clientsLock.Unlock()
 	go h.clientToWS(clientId, conn)
 	return
 }
@@ -99,7 +111,9 @@ func (h *wsClientHandler) closeClient(clientId uint32) {
 	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, clientId)
 	h.wsBuf <- buf
+	h.clientsLock.Lock()
 	delete(h.clients, clientId)
+	h.clientsLock.Unlock()
 }
 
 func (h *wsClientHandler) readMessages() error {
@@ -130,14 +144,18 @@ func (h *wsClientHandler) readMessages() error {
 			continue
 		}
 		clientId := binary.LittleEndian.Uint32(buf)
+		h.clientsLock.Lock()
 		conn, have := h.clients[clientId]
+		h.clientsLock.Unlock()
 		if len(buf) == 4 {
 			if !have {
 				continue
 			}
 			log.Printf("client %d disconnected", clientId)
 			conn.Close()
+			h.clientsLock.Lock()
 			delete(h.clients, clientId)
+			h.clientsLock.Unlock()
 		}
 		if !have {
 			if debug {
@@ -197,7 +215,8 @@ func main() {
 
 	clients := &wsClientHandler{
 		ws: ws, clients: make(map[uint32]net.Conn),
-		proto: proto, addr: connAddr,
+		clientsLock: &sync.Mutex{},
+		proto:       proto, addr: connAddr,
 		wsBuf: make(chan []byte, 32),
 	}
 	go clients.toWSLoop()

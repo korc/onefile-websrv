@@ -5,33 +5,55 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"sync"
 
 	"github.com/gorilla/websocket"
 )
 
 type wsSink struct {
-	ws  *websocket.Conn
-	buf chan interface{}
+	ws        *websocket.Conn
+	buf       chan interface{}
+	closeOnce *sync.Once
+	done      chan struct{}
 }
 
 func newWSSink(ws *websocket.Conn, bufSize int) *wsSink {
-	if bufSize == 0 {
-		bufSize = 4
+	ret := &wsSink{
+		ws:        ws,
+		buf:       make(chan interface{}, bufSize),
+		done:      make(chan struct{}),
+		closeOnce: &sync.Once{},
 	}
-	ret := &wsSink{ws: ws, buf: make(chan interface{}, bufSize)}
-	go ret.copyToWSLoop()
+	if ws != nil {
+		go ret.copyToWSLoop()
+	}
 	return ret
+}
+
+func (s *wsSink) Write(data []byte) (int64, error) {
+	select {
+	case <-s.done:
+		return 0, io.ErrClosedPipe
+	case s.buf <- data:
+		return int64(len(data)), nil
+	}
 }
 
 func (s *wsSink) copyToWSLoop() {
 	defer s.ws.Close()
 	for {
-		data := <-s.buf
+		var data interface{}
+		select {
+		case <-s.done:
+		case data = <-s.buf:
+		}
 		if data == nil {
 			break
 		}
@@ -52,13 +74,15 @@ func (s *wsSink) copyToWSLoop() {
 }
 
 func (s *wsSink) Close() {
-	close(s.buf)
+	s.closeOnce.Do(func() {
+		close(s.done)
+		close(s.buf)
+	})
 }
 
 type wsProxyService struct {
 	clients  map[uint32]*wsSink
 	listener *wsSink
-	seq      uint32
 	lock     *sync.Mutex
 }
 
@@ -73,13 +97,13 @@ func (svc *wsProxyService) Reset() {
 		cl.Close()
 	}
 	svc.clients = make(map[uint32]*wsSink)
-	svc.seq = 0
 }
 
 func (svc *wsProxyService) handleListener(ws *websocket.Conn) {
 	svc.lock.Lock()
 	svc.listener = newWSSink(ws, 32)
 	svc.lock.Unlock()
+	debugMissing, _ := strconv.ParseBool(os.Getenv("DEBUG_WSPRX"))
 	for {
 		_, data, err := ws.ReadMessage()
 		if err != nil {
@@ -91,29 +115,34 @@ func (svc *wsProxyService) handleListener(ws *websocket.Conn) {
 			break
 		}
 		clientId := binary.LittleEndian.Uint32(data)
+		svc.lock.Lock()
 		client, have := svc.clients[clientId]
+		svc.lock.Unlock()
 		if !have {
-			if len(data) > 4 {
-				log.Printf("data for non-existing client %d:\n%s", clientId, hex.Dump(data[4:]))
+			if debugMissing && len(data) > 4 {
+				log.Printf("%d bytes for non-existing client %d:\n%s", len(data)-4, clientId, hex.Dump(data[4:32+4]))
 			}
+			svc.closeClient(clientId)
 			continue
 		}
+		closeClient := false
 		if len(data) == 4 {
+			closeClient = true
+		} else if _, err := client.Write(data[4:]); err != nil {
+			closeClient = true
+		}
+		if closeClient {
 			client.Close()
 			svc.lock.Lock()
 			delete(svc.clients, clientId)
 			svc.lock.Unlock()
-		} else {
-			client.buf <- data[4:]
 		}
 	}
 	svc.Reset()
 }
 
-func (svc *wsProxyService) handleClient(ws *websocket.Conn) {
+func (svc *wsProxyService) handleClient(ws *websocket.Conn, clientId uint32) {
 	svc.lock.Lock()
-	svc.seq += 1
-	clientId := svc.seq
 	svc.clients[clientId] = newWSSink(ws, 4)
 	svc.lock.Unlock()
 	defer ws.Close()
@@ -210,7 +239,8 @@ func (wsprx *wsProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isListener {
 		prxSvc.handleListener(ws)
 	} else {
-		prxSvc.handleClient(ws)
+		reqNr := r.Context().Value(requestNumberContext).(int64)
+		prxSvc.handleClient(ws, uint32(reqNr))
 	}
 }
 

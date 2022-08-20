@@ -13,25 +13,28 @@ import (
 
 type WSProxyRoundTripper struct{}
 
-func (svc *wsProxyService) DialTo() (net.Conn, error) {
+func (svc *wsProxyService) DialTo(clientId uint32) (net.Conn, error) {
 	if svc.listener == nil {
 		return nil, net.ErrClosed
 	}
 	reqConn, conn := net.Pipe()
 	svc.lock.Lock()
-	svc.seq += 1
-	clientId := svc.seq
-	svc.clients[clientId] = &wsSink{buf: make(chan interface{}, 4)}
+	client := newWSSink(nil, 0)
+	svc.clients[clientId] = client
 	svc.lock.Unlock()
 	svc.listener.buf <- map[string]interface{}{"connected": clientId}
-	go func() {
+	go func(s *wsSink) {
+		defer s.Close()
 		defer conn.Close()
+		defer reqConn.Close()
 		defer svc.closeClient(clientId)
 		for {
 			data := make([]byte, 16*1024)
 			n, err := conn.Read(data)
 			if err != nil {
-				log.Printf("Could not read[%d] from http request pipe: %s", n, err)
+				if err != io.EOF {
+					log.Printf("Could not read[%d] from http request pipe: %s", n, err)
+				}
 				break
 			}
 			if n == 0 {
@@ -42,12 +45,18 @@ func (svc *wsProxyService) DialTo() (net.Conn, error) {
 			copy(msg[4:], data[:n])
 			svc.listener.buf <- msg
 		}
-	}()
+	}(client)
 	go func(s *wsSink) {
+		defer s.Close()
 		defer conn.Close()
+		defer reqConn.Close()
 		defer svc.closeClient(clientId)
 		for {
-			data := <-s.buf
+			var data interface{}
+			select {
+			case <-s.done:
+			case data = <-s.buf:
+			}
 			if data == nil {
 				break
 			}
@@ -61,11 +70,13 @@ func (svc *wsProxyService) DialTo() (net.Conn, error) {
 				}
 			}
 			if n, err := io.Copy(conn, bytes.NewReader(dataOut)); err != nil {
-				log.Printf("could not send %d/%d bytes to http req: %s", n, len(dataOut), err)
+				if err.Error() != "io: read/write on closed pipe" {
+					log.Printf("could not send %d/%d bytes to http req: %s", n, len(dataOut), err)
+				}
 				break
 			}
 		}
-	}(svc.clients[clientId])
+	}(client)
 	return reqConn, nil
 }
 
@@ -76,7 +87,8 @@ func (*WSProxyRoundTripper) RoundTrip(request *http.Request) (*http.Response, er
 
 	return (&http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return wsprxSvc.DialTo()
+			reqNum := ctx.Value(requestNumberContext).(uint64)
+			return wsprxSvc.DialTo(uint32(reqNum))
 		},
 	}).RoundTrip(request)
 }
