@@ -43,7 +43,7 @@ func getWSMux(addr string) *wsMux {
 func (m *wsMux) NewConn(r *http.Request) *wsMuxConn {
 	m.bufMux.Lock()
 	defer m.bufMux.Unlock()
-	ret := &wsMuxConn{mux: m, reqNum: r.Context().Value(requestNumberContext).(uint64)}
+	ret := &wsMuxConn{mux: m, reqNum: uint64(r.Context().Value(requestNumberContext).(int))}
 	m.readBuffers[ret.reqNum] = make(chan []byte, 1)
 	return ret
 }

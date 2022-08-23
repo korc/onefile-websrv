@@ -185,6 +185,7 @@ func getWsPrxSvc(name string) *wsProxyService {
 	defer wsProxyListLock.Unlock()
 	prxSvc, have := wsProxyList[name]
 	if !have {
+		log.Printf("new wsprx: %#v", name)
 		prxSvc = &wsProxyService{clients: make(map[uint32]*wsSink), lock: &sync.Mutex{}}
 		wsProxyList[name] = prxSvc
 	}
@@ -239,7 +240,7 @@ func (wsprx *wsProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isListener {
 		prxSvc.handleListener(ws)
 	} else {
-		reqNr := r.Context().Value(requestNumberContext).(int64)
+		reqNr := r.Context().Value(requestNumberContext).(int)
 		prxSvc.handleClient(ws, uint32(reqNr))
 	}
 }

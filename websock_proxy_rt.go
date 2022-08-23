@@ -87,7 +87,7 @@ func (*WSProxyRoundTripper) RoundTrip(request *http.Request) (*http.Response, er
 
 	return (&http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			reqNum := ctx.Value(requestNumberContext).(uint64)
+			reqNum := ctx.Value(requestNumberContext).(int)
 			return wsprxSvc.DialTo(uint32(reqNum))
 		},
 	}).RoundTrip(request)

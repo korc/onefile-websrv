@@ -130,7 +130,7 @@ func (rl *RemoteLogger) log(logType string, msg interface{}) error {
 func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	myEntryNr := atomic.AddUint64(&hl.logEntryNumber, 1)
 	lw := NewLoggedResponseWriter(w)
-	ctx := context.WithValue(r.Context(), requestNumberContext, myEntryNr)
+	ctx := context.WithValue(r.Context(), requestNumberContext, int(myEntryNr))
 	newReq := r.WithContext(ctx)
 	requestLogged := false
 	if hl.remoteLogger != nil {
