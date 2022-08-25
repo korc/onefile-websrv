@@ -4,10 +4,12 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -24,13 +26,48 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 		pathRe = regexp.MustCompile(rePat)
 	}
 
+	pathReWithHost, _ := strconv.ParseBool(connectParams["re-host"])
+	debugPathRe, _ := strconv.ParseBool(connectParams["debug-re"])
+
 	defaultDirector := prxHandler.Director
 	prxHandler.Director = func(request *http.Request) {
-		reqPath := request.URL.Path
+		origPath := request.URL.Path
+		origHost := request.URL.Host
+		origRequest := request.Clone(request.Context())
 		defaultDirector(request)
 		if pathRe != nil {
-			request.URL.Path = string(pathRe.ExpandString([]byte{}, httpURL.Path, reqPath,
-				pathRe.FindStringSubmatchIndex(reqPath)))
+			if origPath == "" {
+				origPath = "/"
+			} else if origPath[0] != '/' {
+				origPath = "/" + origPath
+			}
+			orig := origPath
+			if pathReWithHost {
+				orig = origHost + orig
+			}
+			matches := pathRe.FindAllStringSubmatchIndex(orig, -1)
+			if matches == nil {
+				logf(request, logLevelError, "re %#v does not match host=%#v url=%#v -> %#v",
+					pathRe.String(), origRequest.Host, origRequest.URL, orig)
+			}
+			dst := []byte{}
+			for _, submatch := range matches {
+				dst = pathRe.ExpandString(dst, handlerParams, orig, submatch)
+			}
+			if pathReWithHost {
+				if dstUrl, err := url.Parse(string(dst)); err != nil {
+					logf(request, logLevelError, "cannot parse result as URL %#v: %s", string(dst), err)
+				} else {
+					request.URL.Host = dstUrl.Host
+					request.URL.Path = dstUrl.Path
+				}
+			} else {
+				request.URL.Path = string(dst)
+			}
+			if debugPathRe {
+				log.Printf("request.URL[re-host=%v]: dst%#v orig=%#v req=%#v params=%#v",
+					pathReWithHost, request.URL.String(), orig, origRequest, handlerParams)
+			}
 		}
 		for _, hdr := range []string{"fp-hdr", "cn-hdr", "cert-hdr", "subj-hdr"} {
 			if hdrName, ok := connectParams[hdr]; ok {
