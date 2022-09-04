@@ -228,7 +228,8 @@ Before program name, can specify environment and args with `{` `}`
     - add `?` before regex (ex: `?^/xyz/.*session_id=.*`) to check full RequestURI including query part (not only Path) for match
   - in curly braces before path regexp can set comma-separated params
     - `host:<hostname>` to apply only for particular virtual hosts (req with `Host: hostname`)
-    - `GET`, `POST`, etc. to filter by HTTP methods 
+    - `GET`, `POST`, etc. to filter by HTTP methods
+    - `onfail:<URL>` redirect to URL when auth fails. can use `@param@` placeholders to solve into url-escaped values from request (ex: `@req:host@`)
   - `:` separates alternate roles (OR operation)
   - `+` makes all specified roles to be required (AND operation)
     - can be used to implement multi-factor auth

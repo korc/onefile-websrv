@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -24,6 +25,23 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/ssh"
 )
+
+type ErrNeedAuthRedirected struct {
+	RedirectTo string
+	Err        error
+}
+
+func (e ErrNeedAuthRedirected) Unwrap() error {
+	return e.Err
+}
+
+func (e ErrNeedAuthRedirected) Error() string {
+	return e.Err.Error() + "[redirect to: " + e.RedirectTo + "]"
+}
+
+var ErrNeedAuth = errors.New("need auth")
+
+var redirectVarRe = regexp.MustCompile("@.*?@")
 
 // ACLRecord maps path regexp to required roles
 type ACLRecord struct {
@@ -33,6 +51,7 @@ type ACLRecord struct {
 	Methods      map[string]bool
 	Hosts        map[string]bool
 	MatchURI     bool
+	OnFail       string
 }
 
 type Authenticator interface {
@@ -248,6 +267,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	var methods map[string]bool
 	var hosts map[string]bool
+	var onFail string
 	matchURI := false
 	if strings.HasPrefix(reExpr, "?") {
 		matchURI = true
@@ -261,6 +281,8 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 					hosts = make(map[string]bool)
 				}
 				hosts[v[5:]] = true
+			} else if strings.HasPrefix(v, "onfail:") {
+				onFail = v[7:]
 			} else {
 				if methods == nil {
 					methods = make(map[string]bool)
@@ -277,7 +299,7 @@ func (ah *AuthHandler) AddACL(reExpr string, roles []string) error {
 	if ah.ACLs == nil {
 		ah.ACLs = make([]ACLRecord, 0)
 	}
-	rec := ACLRecord{re, make(map[string]bool), make(map[string]interface{}), methods, hosts, matchURI}
+	rec := ACLRecord{re, make(map[string]bool), make(map[string]interface{}), methods, hosts, matchURI, onFail}
 	for _, r := range roles {
 		rec.Roles[r] = true
 		for _, singleRole := range strings.Split(r, "+") {
@@ -295,6 +317,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 
 	neededRoles := make(map[string]bool)
 	var rolesToCheck map[string]interface{}
+	var errNoAuth = ErrNeedAuth
 	for _, acl := range ah.ACLs {
 		methodMatch := true
 		hostMatch := true
@@ -315,6 +338,25 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		if methodMatch && hostMatch && acl.Expr.MatchString(testString) {
 			neededRoles = acl.Roles
 			rolesToCheck = acl.RolesToCheck
+			if acl.OnFail != "" {
+				errNoAuth = ErrNeedAuthRedirected{
+					RedirectTo: redirectVarRe.ReplaceAllStringFunc(acl.OnFail, func(varName string) string {
+						if varName == "@@" {
+							return "@"
+						}
+						value, solved, err := GetRequestParam(varName[1:len(varName)-1], r)
+						if !solved {
+							logf(r, logLevelWarning, "cannot solve %#v: %s", varName, err)
+							if err == nil {
+								return varName
+							}
+							return ""
+						}
+						return url.QueryEscape(value)
+					}),
+					Err: errNoAuth,
+				}
+			}
 			break
 		}
 	}
@@ -459,7 +501,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		if len(haveRoles) > 0 {
 			return retReq, nil
 		}
-		return nil, errors.New("need auth")
+		return nil, errNoAuth
 	}
 
 	if len(neededRoles) == 0 {
@@ -485,7 +527,8 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 			return retReq, nil
 		}
 	}
-	return nil, errors.New("need proper auth")
+
+	return nil, errNoAuth
 }
 
 func (ah *AuthHandler) checkAuthPassJWTSecret(jwtString, signer string, r *http.Request, haveRoles, neededRoles map[string]bool) {
@@ -609,6 +652,10 @@ func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if authenticatedRequest, err := ah.checkAuthPass(r); err == nil {
 		next.ServeHTTP(w, authenticatedRequest)
+	} else if errRedirect, ok := err.(ErrNeedAuthRedirected); ok {
+		w.Header().Set("Location", errRedirect.RedirectTo)
+		w.WriteHeader(http.StatusFound)
+		w.Write([]byte(err.Error()))
 	} else {
 		for k := range ah.Auths {
 			switch k {
