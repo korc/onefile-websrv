@@ -62,7 +62,7 @@ func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 				var thisAud string
 				if jka.audTarget == "path" {
 					thisAud = req.URL.Path
-				} else if val, solved, err := solveClaimStringValue(jka.audTarget, req); solved {
+				} else if val, solved, err := GetRequestParam(jka.audTarget, req); solved {
 					thisAud = val
 				} else if err != nil {
 					return nil, err
