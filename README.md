@@ -191,23 +191,8 @@ Before program name, can specify environment and args with `{` `}`
     - if `key` ands with `<claim>_repl`, it must contain sed-like string replacement in `@regex@replacement@` format, which will be applied to the claim `<claim>`
       - any character be used instead of `@`
       - ex: `{aud=req:path,aud_repl=@.*/@@}` assigns `aud` to a filename in the path
-    - `value` can be value string, or prefixed with following:
-      - `str:` plain string following `str:`
-      - `crt:` client certificate data
-        - `cn` subject common name
-        - `subj` full subject
-        - `fp` certificate sha256 fingerprint
-        - `crt` base64-encoded certificate
-      - `q:` URL query value
-      - `post:` POST form value
-      - `hdr:` HTTP request header
-      - `env:` server environment variable
-      - `req:` a value from request parameter
-        - `raddr` client remote address (with port number)
-        - `rip` client remote IP
-        - `host` requested Host
-        - `path` URL path
-      - `ts:` unix timestamp value
+    - `value` can be value string, or a value solved from request (cf. `Parameters from request` section below)
+      - also, `ts:<format>` for unix timestamp based on following:
         - basic format is `+duration` or `-duration` to add or subtract from current time
         - can prefix duration with
           - `today` to make relation based on start of the day in server localtime
@@ -221,6 +206,28 @@ Before program name, can specify environment and args with `{` `}`
 - `-map /login=jwt:{exp=ts:today+25h,sub=crt:cn,alg=ES256}file:jwt.key`
   - signed with EC-DSA key in `jwt.key`, `sub` in claims from client's x509 certificate subject `CN` attribute, expiring on next day at 1am
 
+### Parameters from request
+
+Several options support retrieving a value from request. The syntax is as following:
+
+- `str:` plain string following `str:`
+- `crt:` client certificate data
+  - `cn` subject common name
+  - `subj` full subject
+  - `fp` certificate sha256 fingerprint
+  - `crt` base64-encoded certificate
+- `q:<name>` value of URL query parameter `<name>`
+- `post:<name>` POST form value
+- `hdr:<name>` HTTP request header
+- `env:<name>` server environment variable
+- `auth:<value>`
+  - `bearer` Authorization Bearer value
+  - `basic-usr`, `basic-pwd`  respective Basic auth user/password values
+- `req:` a value from request parameter
+  - `raddr` client remote address (with port number)
+  - `rip` client remote IP
+  - `host` requested Host
+  - `path` URL path
 ### Access control
 
 - `-acl` option will define mapping between URL paths and required roles
@@ -256,7 +263,9 @@ Before program name, can specify environment and args with `{` `}`
       - `auth` value is RSA or ECDSA private or public key in PEM format, unless `{hs=1}` option is given
         - use `env:<varname>` or `file:<filename>` to read value from environment or file
       - `{..}` options values
-        - `query=<name>`, `cookie=<name>`, `header=<name>` look for JWT token from those places as well, in addition to `Authentication: Bearer ...` header
+        - `src=<req_param>` define jwt source, cf. `Parameters from request` for `<req_param>` format
+          - can use `src_xxx` to arbitrarily define multiple sources
+        - `no-bearer=1` do not check `Authorization: Bearer ...` header by default
         - `hs=1` use `auth` value as secret key for HMAC signature
         - `b64=1` decode `auth` value with base64
         - `aud=<type>:<value>` or `aud=path` - determine what is going to be checked for `aud` "*Audience*" claim

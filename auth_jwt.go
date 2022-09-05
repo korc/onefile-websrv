@@ -105,17 +105,17 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 		case "cookie":
 			k = "src_cookie"
 			v = "cookie:" + v
-			logf(nil, logLevelInfo, "DEPRECATED: use src_xxx=cookie:name instead of cookie= as JWT source")
+			logf(nil, logLevelInfo, "DEPRECATED: use src=cookie:name instead of cookie= as JWT source")
 		case "query":
 			k = "src_query"
 			v = "q:" + v
-			logf(nil, logLevelInfo, "DEPRECATED: use src_xxx=q:name instead of query= as JWT source")
+			logf(nil, logLevelInfo, "DEPRECATED: use src=q:name instead of query= as JWT source")
 		case "header":
 			k = "src_header"
 			v = "hdr:" + v
-			logf(nil, logLevelInfo, "DEPRECATED: use src_xxx=hdr:name instead of header= as JWT source")
+			logf(nil, logLevelInfo, "DEPRECATED: use src=hdr:name instead of header= as JWT source")
 		}
-		if !strings.HasPrefix(k, "src_") {
+		if k != "src" && !strings.HasPrefix(k, "src_") {
 			continue
 		}
 		jka.jwtSources = append(jka.jwtSources, v)
