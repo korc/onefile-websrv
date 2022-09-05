@@ -5,10 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+
+	"github.com/golang-jwt/jwt/v4"
 )
 
 var ErrCantSolve = errors.New("cannot to solve request param")
@@ -111,6 +115,27 @@ func GetRequestParam(param string, req *http.Request) (value string, solved bool
 			logf(req, logLevelWarning, "unknown req: param %#v", param[4:])
 			return "", false, ErrValueNotSet
 		}
+	} else if strings.HasPrefix(param, "jwt:") {
+		claimEndIdx := strings.Index(param[4:], ":") + 4
+		tokenString, solved, err := GetRequestParam(param[claimEndIdx+1:], req)
+		if !solved {
+			return "", solved, err
+		}
+		claims := jwt.MapClaims{}
+		if _, _, err := jwt.NewParser().ParseUnverified(tokenString, claims); err != nil {
+			logf(req, logLevelWarning, "cannot parse jwt from %#v: %s", param[claimEndIdx+1:], err)
+			return "", false, err
+		}
+		claimName, err := url.QueryUnescape(param[4:claimEndIdx])
+		if err != nil {
+			logf(req, logLevelError, "cannot unescape claim name %#v: %s", param[4:claimEndIdx], err)
+			return "", false, err
+		}
+		claim, have := claims[claimName]
+		if !have {
+			return "", false, ErrValueNotSet
+		}
+		return fmt.Sprintf("%s", claim), true, nil
 	}
 	return "", false, nil
 }

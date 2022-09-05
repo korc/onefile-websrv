@@ -228,6 +228,9 @@ Several options support retrieving a value from request. The syntax is as follow
   - `rip` client remote IP
   - `host` requested Host
   - `path` URL path
+- `jwt:<claim>:<src>`
+  - parse JWT from `<src>` (same syntax as above), and retrieve value of claim named `<claim>`. The name is assumed to be must be URL-escaped.
+
 ### Access control
 
 - `-acl` option will define mapping between URL paths and required roles
