@@ -22,42 +22,32 @@ func init() {
 }
 
 type JWTAuthenticator struct {
-	roles     []string
-	jwtCookie string
-	jwtQuery  string
-	jwtHeader string
-	keyFunc   jwt.Keyfunc
-	isSecret  bool
-	audRe     *regexp.Regexp
-	audTarget string
+	roles      []string
+	jwtSources []string
+	keyFunc    jwt.Keyfunc
+	isSecret   bool
+	audRe      *regexp.Regexp
+	audTarget  string
+}
+
+type jwtTokenWithSource struct {
+	tkn string
+	src string
 }
 
 func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string]interface{}) (roles []string, err error) {
-	sources := [][]string{}
-	if authHdr := req.Header.Get("Authorization"); authHdr != "" {
-		if strings.HasPrefix(authHdr, "Bearer ") {
-			sources = append(sources, []string{authHdr[7:], "auth-hdr", "Bearer"})
-		}
-	}
-	if jka.jwtCookie != "" {
-		if cookie, err := req.Cookie(jka.jwtCookie); err == nil {
-			sources = append(sources, []string{cookie.Value, "cookie", jka.jwtCookie})
-		}
-	}
-	if jka.jwtHeader != "" {
-		if hdr := req.Header.Get(jka.jwtHeader); hdr != "" {
-			sources = append(sources, []string{hdr, "header", jka.jwtHeader})
-		}
-	}
-	if jka.jwtQuery != "" {
-		if q := req.URL.Query().Get(jka.jwtQuery); q != "" {
-			sources = append(sources, []string{q, "query", jka.jwtHeader})
+	sources := []jwtTokenWithSource{}
+
+	for _, param := range jka.jwtSources {
+		if tkn, got, err := GetRequestParam(param, req); got {
+			sources = append(sources, jwtTokenWithSource{tkn, param})
+		} else if err == nil {
+			logf(req, logLevelWarning, "unknown source: %#v", param)
 		}
 	}
 
 	for _, src := range sources {
-		tokenString, srcType, srcName := src[0], src[1], src[2]
-		if tkn, err := jwt.Parse(tokenString, jka.keyFunc); err == nil {
+		if tkn, err := jwt.Parse(src.tkn, jka.keyFunc); err == nil {
 			if jka.audTarget != "" {
 				var thisAud string
 				if jka.audTarget == "path" {
@@ -92,7 +82,7 @@ func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 			}
 			return jka.roles, nil
 		} else if _, ok := err.(*jwt.ValidationError); !ok {
-			logf(req, logLevelError, "Could not parse JWT from %s %#v=%#v: %s", srcType, srcName, tokenString, err)
+			logf(req, logLevelError, "Could not parse JWT from %#v: %s", src, err)
 			return nil, err
 		}
 	}
@@ -103,10 +93,32 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 	options, jwtKey := parseCurlyParams(check)
 	jka = &JWTAuthenticator{
 		roles:     roles,
-		jwtCookie: options["cookie"],
-		jwtQuery:  options["query"],
-		jwtHeader: options["header"],
 		audTarget: options["aud"],
+	}
+
+	if noBearer, _ := strconv.ParseBool(options["no-bearer"]); !noBearer {
+		jka.jwtSources = append(jka.jwtSources, "auth:bearer")
+	}
+
+	for k, v := range options {
+		switch k {
+		case "cookie":
+			k = "src_cookie"
+			v = "cookie:" + v
+			logf(nil, logLevelInfo, "DEPRECATED: use src_xxx=cookie:name instead of cookie= as JWT source")
+		case "query":
+			k = "src_query"
+			v = "q:" + v
+			logf(nil, logLevelInfo, "DEPRECATED: use src_xxx=q:name instead of query= as JWT source")
+		case "header":
+			k = "src_header"
+			v = "hdr:" + v
+			logf(nil, logLevelInfo, "DEPRECATED: use src_xxx=hdr:name instead of header= as JWT source")
+		}
+		if !strings.HasPrefix(k, "src_") {
+			continue
+		}
+		jka.jwtSources = append(jka.jwtSources, v)
 	}
 
 	if audRe, haveOpt := options["aud-re"]; haveOpt {

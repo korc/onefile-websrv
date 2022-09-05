@@ -17,6 +17,31 @@ var ErrValueNotSet = errors.New("parameter value not set")
 func GetRequestParam(param string, req *http.Request) (value string, solved bool, err error) {
 	if strings.HasPrefix(param, "str:") {
 		return param[4:], true, nil
+	} else if strings.HasPrefix(param, "auth:") {
+		authHeaders := req.Header.Values("Authorization")
+		if len(authHeaders) == 0 {
+			return "", false, ErrValueNotSet
+		}
+		switch param[5:] {
+		case "bearer":
+			for _, v := range authHeaders {
+				if strings.HasPrefix(v, "Bearer ") {
+					return v[7:], true, nil
+				}
+			}
+		case "basic-pwd", "basic-usr":
+			usr, pwd, ok := req.BasicAuth()
+			if !ok {
+				return "", false, ErrValueNotSet
+			}
+			switch param[5+6:] {
+			case "pwd":
+				return pwd, true, nil
+			case "usr":
+				return usr, true, nil
+			}
+		}
+		return "", false, ErrValueNotSet
 	} else if strings.HasPrefix(param, "crt:") {
 		if req.TLS == nil {
 			logf(req, logLevelError, "cannot get X.509 data from non-TLS request")

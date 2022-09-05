@@ -227,6 +227,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 			return
 		}
 	case "JWTSecret", "JWTFilePat":
+		logf(nil, logLevelWarning, "DEPRECATED: please use JWT auth method instead of %#v", method)
 		if m1 := jwtParamDetect.FindString(check); m1 != "" {
 			// TODO Caveat: overwrites previous role of same check
 			check = check[len(m1):]

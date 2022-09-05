@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -224,7 +225,7 @@ func TestJWTSecretAuth(t *testing.T) {
 		role        string
 		secret      string
 		signedToken string
-	}, 3)
+	}, 4)
 	h := &AuthHandler{}
 	for i := range tokens {
 		rndBytes := make([]byte, 8)
@@ -240,10 +241,12 @@ func TestJWTSecretAuth(t *testing.T) {
 		t.Logf("Signed token: %#v (secret=%#v)", tokens[i].signedToken, tokens[i].secret)
 	}
 	u, _ := url.Parse("/")
-	h.AddAuth("JWTSecret", tokens[0].secret, tokens[0].role)
-	h.AddAuth("JWTSecret", "{cookie=tst,header=X-Secret,query=tsse}"+tokens[1].secret, tokens[1].role)
+	h.AddAuth("JWT", "{hs=1}"+tokens[0].secret, tokens[0].role)
+	h.AddAuth("JWT", "{hs=1,src_1=cookie:tst,src_2=hdr:X-Secret,src_3=q:tsse}"+tokens[1].secret, tokens[1].role)
 	os.Setenv("TKN3SECRET", tokens[2].secret)
-	h.AddAuth("JWTSecret", "${TKN3SECRET}", tokens[2].role)
+	h.AddAuth("JWT", "{hs=1}env:TKN3SECRET", tokens[2].role)
+	tokens[3].signedToken, _ = jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"aud": tokens[3].role}).SignedString([]byte(tokens[3].secret))
+	h.AddAuth("JWT", "{hs=1,no-bearer=1,src_tkn=auth:basic-pwd,aud=auth:basic-usr}"+tokens[3].secret, tokens[3].role)
 
 	t.Run("jwt-secret", func(t *testing.T) {
 		if _, err := h.checkAuthPass(&http.Request{Header: http.Header{}, URL: u}); err == nil {
@@ -268,21 +271,42 @@ func TestJWTSecretAuth(t *testing.T) {
 				t.Error("Should have test3 role")
 			}
 		}
-		q := u.Query()
-		q.Set("tsse", tokens[1].signedToken)
-		u.RawQuery = q.Encode()
-		t.Logf("query param: %#v", u.Query().Get("tsse"))
-		if req, err := h.checkAuthPass(&http.Request{Header: http.Header{}, URL: u}); err != nil {
-			t.Errorf("Auth should pass")
-		} else {
+		t.Run("query+no-bearer", func(t *testing.T) {
+			q := u.Query()
+			q.Set("tsse", tokens[1].signedToken)
+			u.RawQuery = q.Encode()
+			t.Logf("query param: %#v", u.Query().Get("tsse"))
+			if req, err := h.checkAuthPass(&http.Request{Header: http.Header{"Authorization": []string{"Bearer " + tokens[3].signedToken}}, URL: u}); err != nil {
+				t.Errorf("Auth should pass")
+			} else {
+				roles := req.Context().Value(authRoleContext).(map[string]bool)
+				if _, ok := roles["test2"]; !ok {
+					t.Error("Should have test2 role")
+				}
+				delete(roles, "test2")
+				if len(roles) > 0 {
+					t.Error("Should have no other roles")
+				}
+			}
+		})
+		t.Run("basic-auth-pwd", func(t *testing.T) {
+			t.Run("bad-username", func(t *testing.T) {
+				ba := base64.StdEncoding.EncodeToString([]byte("user:" + tokens[3].signedToken))
+				_, err := h.checkAuthPass(&http.Request{Header: http.Header{"Authorization": []string{"Basic " + ba}}, URL: u})
+				if err != nil {
+					t.Errorf("auth should not pass")
+				}
+			})
+			ba := base64.StdEncoding.EncodeToString([]byte("test4:" + tokens[3].signedToken))
+			req, err := h.checkAuthPass(&http.Request{Header: http.Header{"Authorization": []string{"Basic " + ba}}, URL: u})
+			if err != nil {
+				t.Errorf("auth should pass")
+				return
+			}
 			roles := req.Context().Value(authRoleContext).(map[string]bool)
-			if _, ok := roles["test2"]; !ok {
-				t.Error("Should have test2 role")
+			if _, ok := roles["test4"]; !ok {
+				t.Error("should have test4 role")
 			}
-			delete(roles, "test2")
-			if len(roles) > 0 {
-				t.Error("Should have no other roles")
-			}
-		}
+		})
 	})
 }
