@@ -328,7 +328,15 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 			}
 		}
 		if acl.Hosts != nil {
-			if _, ok := acl.Hosts[r.Host]; !ok {
+			host := r.Host
+			if strings.Contains(host, ":") {
+				var err error
+				host, _, err = net.SplitHostPort(host)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if _, ok := acl.Hosts[host]; !ok {
 				hostMatch = false
 			}
 		}
@@ -658,6 +666,7 @@ func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusFound)
 		w.Write([]byte(err.Error()))
 	} else {
+		logf(r, logLevelInfo, "auth failed: %s", err)
 		for k := range ah.Auths {
 			switch k {
 			case "JWTSecret", "JWTFilePat":
