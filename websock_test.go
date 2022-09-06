@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -152,11 +153,12 @@ func readWriteGrlWS(t *testing.T, srv *httptest.Server, testString []byte) (ret 
 
 func genSelfSigned(t *testing.T) tls.Certificate {
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(-1),
-		NotAfter:     time.Now().Add(time.Hour),
-		NotBefore:    time.Now().Add(-time.Minute),
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotAfter:    time.Now().Add(time.Hour),
+		NotBefore:   time.Now().Add(-time.Minute),
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 	}
+	template.SerialNumber, _ = rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal("Cannot generate private key: ", err)
