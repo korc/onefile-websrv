@@ -14,7 +14,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/http/cgi"
 	"os"
 	"os/user"
 	"regexp"
@@ -267,34 +266,6 @@ func main() {
 			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket", "ws":
 			http.Handle(urlPath, newWebSocketHandler(handlerParams).setReadTimeout(*wsReadTimeout))
-		case "cgi":
-			var env, inhEnv, args []string
-			if strings.HasPrefix(handlerParams, "{") {
-				ebIndex := strings.Index(handlerParams, "}")
-				if ebIndex < 0 {
-					logf(nil, logLevelFatal, "No end brace")
-				}
-				for _, v := range strings.Split(handlerParams[1:ebIndex], ",") {
-					if strings.HasPrefix(v, "arg:") {
-						if args == nil {
-							args = make([]string, 0)
-						}
-						args = append(args, v[4:])
-					} else if eqIndex := strings.Index(v, "="); eqIndex < 0 {
-						if inhEnv == nil {
-							inhEnv = make([]string, 0)
-						}
-						inhEnv = append(inhEnv, v)
-					} else {
-						if env == nil {
-							env = make([]string, 0)
-						}
-						env = append(env, v)
-					}
-				}
-				handlerParams = handlerParams[ebIndex+1:]
-			}
-			http.Handle(urlPath, &cgi.Handler{Path: handlerParams, Root: strings.TrimRight(urlPathNoHost, "/"), Env: env, InheritEnv: inhEnv, Args: args})
 		default:
 			if createHandler, have := protocolHandlers[urlHandler[:handlerTypeIdx]]; have {
 				handler, err := createHandler(urlPath, handlerParams, cfg)
