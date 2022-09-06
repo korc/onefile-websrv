@@ -537,6 +537,10 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		}
 	}
 
+	if os.Getenv("LOG_AUTH_ROLES") != "" {
+		logf(retReq, logLevelInfo, "auth NG, have=%v needed=%v", haveRoles, neededRoles)
+	}
+
 	return nil, errNoAuth
 }
 
@@ -660,6 +664,11 @@ func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if authenticatedRequest, err := ah.checkAuthPass(r); err == nil {
+		if os.Getenv("LOG_AUTH_ROLES") != "" {
+			if roles, ok := authenticatedRequest.Context().Value(authRoleContext).(map[string]bool); ok {
+				logf(authenticatedRequest, logLevelInfo, "auth OK, roles=%v", roles)
+			}
+		}
 		next.ServeHTTP(w, authenticatedRequest)
 	} else if errRedirect, ok := err.(ErrNeedAuthRedirected); ok {
 		w.Header().Set("Location", errRedirect.RedirectTo)
