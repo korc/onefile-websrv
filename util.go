@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,12 +12,15 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"text/template"
 
 	"github.com/golang-jwt/jwt/v4"
 )
 
 var ErrCantSolve = errors.New("cannot to solve request param")
 var ErrValueNotSet = errors.New("parameter value not set")
+
+var tmplCache = map[string]*template.Template{}
 
 func GetRequestParam(param string, req *http.Request) (value string, solved bool, err error) {
 	if strings.HasPrefix(param, "str:") {
@@ -136,6 +140,45 @@ func GetRequestParam(param string, req *http.Request) (value string, solved bool
 			return "", false, ErrValueNotSet
 		}
 		return fmt.Sprintf("%s", claim), true, nil
+	} else if strings.HasPrefix(param, "unescape:") {
+		unescapeStr := param[9:]
+		if strings.Contains(unescapeStr, ":") {
+			unescapeStr, solved, err = GetRequestParam(unescapeStr, req)
+			if !solved {
+				return "", solved, err
+			}
+		}
+		unesc, err := url.QueryUnescape(unescapeStr)
+		if err != nil {
+			return "", false, err
+		}
+		return unesc, true, nil
+	} else if strings.HasPrefix(param, "tmpl:") {
+		tmplSrc, solved, err := GetRequestParam(param[5:], req)
+		if !solved {
+			return "", solved, err
+		}
+		h := sha256.New()
+		name := base64.StdEncoding.EncodeToString(h.Sum([]byte(tmplSrc)))
+		tmpl, have := tmplCache[name]
+		if !have {
+			tmpl, err = template.New(name).Funcs(template.FuncMap{
+				"rp": func(n string, req *http.Request) (ret string, err error) {
+					ret, _, err = GetRequestParam(n, req)
+					return
+				},
+			}).Parse(string(tmplSrc))
+			if err != nil {
+				logf(req, logLevelError, "Error parsing template %#v: %s", tmplSrc, err)
+				return "", false, err
+			}
+			tmplCache[name] = tmpl
+		}
+		buf := bytes.NewBuffer([]byte{})
+		if err := tmpl.Execute(buf, map[string]interface{}{"req": req}); err != nil {
+			return "", false, err
+		}
+		return buf.String(), true, nil
 	}
 	return "", false, nil
 }

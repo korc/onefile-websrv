@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -308,5 +311,34 @@ func TestJWTSecretAuth(t *testing.T) {
 				t.Error("should have test4 role")
 			}
 		})
+	})
+}
+
+func TestJWTTmpl(t *testing.T) {
+	secret := new(bytes.Buffer)
+	io.CopyN(secret, rand.Reader, 32)
+	tkn := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "test"})
+	tknStr, _ := tkn.SignedString(secret.Bytes())
+	h := &AuthHandler{}
+	tokenParts := strings.Split(tknStr, ".")
+	tmpl := strings.Join(tokenParts[:2], ".") + ".{{rp \"q:sig\" .req}}"
+	h.AddAuth("JWT", "{hs=1,b64=1,src=tmpl:unescape:str:"+url.QueryEscape(tmpl)+"}"+base64.StdEncoding.EncodeToString(secret.Bytes()), "role1")
+	t.Run("jwt-tmpl-ok-sig", func(t *testing.T) {
+		u, _ := url.Parse("/?sig=" + tokenParts[2])
+		if _, err := h.checkAuthPass(&http.Request{Header: http.Header{}, URL: u}); err != nil {
+			t.Errorf("Auth should pass")
+		}
+	})
+	t.Run("jwt-tmpl-no-sig", func(t *testing.T) {
+		u, _ := url.Parse("/")
+		if _, err := h.checkAuthPass(&http.Request{Header: http.Header{}, URL: u}); err == nil {
+			t.Errorf("Auth should NOT pass")
+		}
+	})
+	t.Run("jwt-tmpl-bad-sig", func(t *testing.T) {
+		u, _ := url.Parse("/?sig=DEFINITELY-A-BAD-SIGNATURE")
+		if _, err := h.checkAuthPass(&http.Request{Header: http.Header{}, URL: u}); err == nil {
+			t.Errorf("Auth should NOT pass")
+		}
 	})
 }

@@ -37,8 +37,23 @@ type jwtTokenWithSource struct {
 
 func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string]interface{}) (roles []string, err error) {
 	sources := []jwtTokenWithSource{}
+	if os.Getenv("DEBUG_JWT_ROLES") != "" {
+		logf(req, logLevelInfo, "jwt roles=%v needed=%v", jka.roles, rolesToCheck)
+	}
 
 	for _, param := range jka.jwtSources {
+		if rolesToCheck != nil && strings.HasPrefix(param, "tmpl:") {
+			needed := false
+			for _, role := range jka.roles {
+				if _, have := rolesToCheck[role]; have {
+					needed = true
+					break
+				}
+			}
+			if !needed {
+				continue
+			}
+		}
 		if tkn, got, err := GetRequestParam(param, req); got {
 			sources = append(sources, jwtTokenWithSource{tkn, param})
 		} else if err == nil {

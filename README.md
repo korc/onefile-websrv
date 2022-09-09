@@ -230,6 +230,14 @@ Several options support retrieving a value from request. The syntax is as follow
   - `path` URL path
 - `jwt:<claim>:<src>`
   - parse JWT from `<src>` (same syntax as above), and retrieve value of claim named `<claim>`. The name is assumed to be must be URL-escaped.
+- `unescape:<src>`
+  - solve `<src>` via request, and url-unescape it
+  - if `<src>` does not contain `:`, it is assumed to be verbatim string
+- `tmpl:<src>`
+  - construct string from template, which is parameter defined in `<src>`
+    - ex: `tmpl:env:ENV_TEMPLATE_VAR`
+  - `.req` data is set to current request
+  - `rp <param> <req>` function is added to retrieve other parameters from request
 
 ### Access control
 
