@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -166,6 +167,22 @@ func GetRequestParam(param string, req *http.Request) (value string, solved bool
 				"rp": func(n string, req *http.Request) (ret string, err error) {
 					ret, _, err = GetRequestParam(n, req)
 					return
+				},
+				"b64url":    base64.RawURLEncoding.EncodeToString,
+				"b64":       base64.StdEncoding.EncodeToString,
+				"b64dec":    base64.StdEncoding.DecodeString,
+				"b64decurl": base64.RawURLEncoding.DecodeString,
+				"json":      json.Marshal,
+				"stob":      func(s string) []byte { return []byte(s) },
+				"map": func(args ...interface{}) (map[string]interface{}, error) {
+					if len(args)%2 != 0 {
+						return nil, errors.New("odd number of arguments")
+					}
+					ret := map[string]interface{}{}
+					for i := 0; i < len(args); i += 2 {
+						ret[args[i].(string)] = args[i+1]
+					}
+					return ret, nil
 				},
 			}).Parse(string(tmplSrc))
 			if err != nil {

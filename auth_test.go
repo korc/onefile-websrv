@@ -321,10 +321,10 @@ func TestJWTTmpl(t *testing.T) {
 	tknStr, _ := tkn.SignedString(secret.Bytes())
 	h := &AuthHandler{}
 	tokenParts := strings.Split(tknStr, ".")
-	tmpl := strings.Join(tokenParts[:2], ".") + ".{{rp \"q:sig\" .req}}"
+	tmpl := tokenParts[0] + `.{{b64url (json (map "sub" (rp "q:sub" .req)))}}.{{rp "q:sig" .req}}`
 	h.AddAuth("JWT", "{hs=1,b64=1,src=tmpl:unescape:str:"+url.QueryEscape(tmpl)+"}"+base64.StdEncoding.EncodeToString(secret.Bytes()), "role1")
 	t.Run("jwt-tmpl-ok-sig", func(t *testing.T) {
-		u, _ := url.Parse("/?sig=" + tokenParts[2])
+		u, _ := url.Parse("/?sub=test&sig=" + tokenParts[2])
 		if _, err := h.checkAuthPass(&http.Request{Header: http.Header{}, URL: u}); err != nil {
 			t.Errorf("Auth should pass")
 		}
