@@ -287,6 +287,9 @@ Several options support retrieving a value from request. The syntax is as follow
         - `aud=<type>:<value>` or `aud=path` - determine what is going to be checked for `aud` "*Audience*" claim
           - `type` and `value` use same syntax as claim string values in [JWT handler](#jwt-handler) (no `ts:` timestamp).
         - `aud-re=<regexp>` aud value (`path` by default, can be overwritten by `aud=`) will be matched against regexp, if subgroups found then first group will be used as value
+        - `test=claim:<name>:<test>` or `test_<xxx>=claim:<name>:<test>`
+          - `<name>` is a url-escaped name of a claim to test
+          - `<test>` is a plain string, or a request parameter if contains `:`
     - `JWTSecret` *DEPRECATED* in favor of `JWT`
       - checks if JWT from `Authentication: Bearer` header is signed by specific authority
       - `auth` contains authority's shared secret

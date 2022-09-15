@@ -24,6 +24,9 @@ var ErrValueNotSet = errors.New("parameter value not set")
 var tmplCache = map[string]*template.Template{}
 
 func GetRequestParam(param string, req *http.Request) (value string, solved bool, err error) {
+	if os.Getenv("DEBUG_GET_REQ_PARAM") != "" {
+		logf(req, logLevelInfo, "GetRequestParam %#v", param)
+	}
 	if strings.HasPrefix(param, "str:") {
 		return param[4:], true, nil
 	} else if strings.HasPrefix(param, "auth:") {

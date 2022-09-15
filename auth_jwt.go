@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -21,11 +23,59 @@ func init() {
 	})
 }
 
+type jwtClaimTest func(*jwt.Token, *http.Request) (bool, error)
+
+func newClaimTest(testType, testArgs string) jwtClaimTest {
+	switch testType {
+	case "claim":
+		var arg1, arg2 string
+		for i, s := range strings.SplitN(testArgs, ":", 2) {
+			v, err := url.QueryUnescape(s)
+			if err != nil {
+				logf(nil, logLevelFatal, "cannot unescape %#v: %s", v, err)
+			}
+			if i == 0 {
+				arg1 = v
+			} else {
+				arg2 = v
+			}
+		}
+		return func(tkn *jwt.Token, req *http.Request) (bool, error) {
+			var src, dst string
+			if claims, ok := tkn.Claims.(jwt.MapClaims); ok {
+				src = fmt.Sprintf("%s", claims[arg1])
+			} else {
+				logf(req, logLevelError, "jwt token does not have MapClaims?")
+				return false, errors.New("no MapClaims")
+			}
+			if strings.Contains(arg2, ":") {
+				var got bool
+				var err error
+				dst, got, err = GetRequestParam(arg2, req)
+				if !got {
+					logf(req, logLevelWarning, "failed claim test for %#v: cannot obtain %#v, err: %s", arg1, arg2, err)
+					return false, err
+				}
+			} else {
+				dst = arg2
+			}
+			if os.Getenv("DEBUG_TEST_CLAIM") != "" {
+				logf(req, logLevelInfo, "claim test %#v == %#v = %v", src, dst, src == dst)
+			}
+			return src == dst, nil
+		}
+	default:
+		logf(nil, logLevelFatal, "test type not in ('claim') for %s: %#v", testType, testArgs)
+	}
+	return nil
+}
+
 type JWTAuthenticator struct {
 	roles      []string
 	jwtSources []string
 	keyFunc    jwt.Keyfunc
 	isSecret   bool
+	claimTests []jwtClaimTest
 	audRe      *regexp.Regexp
 	audTarget  string
 }
@@ -61,6 +111,7 @@ func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 		}
 	}
 
+JWTSourcesLoop:
 	for _, src := range sources {
 		if tkn, err := jwt.Parse(src.tkn, jka.keyFunc); err == nil {
 			if jka.audTarget != "" {
@@ -93,6 +144,15 @@ func (jka *JWTAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 						logf(req, logLevelWarning, "audience check failed: not match %#v = %#v (re=%#v)", jka.audTarget, thisAud, jka.audRe)
 					}
 					continue
+				}
+			}
+			for _, testFunc := range jka.claimTests {
+				res, err := testFunc(tkn, req)
+				if err != nil {
+					logf(req, logLevelInfo, "claim test failed: %s", err)
+				}
+				if !res {
+					continue JWTSourcesLoop
 				}
 			}
 			return jka.roles, nil
@@ -129,6 +189,11 @@ func NewJWTAuthenticator(check string, roles []string) (jka *JWTAuthenticator, e
 			k = "src_header"
 			v = "hdr:" + v
 			logf(nil, logLevelInfo, "DEPRECATED: use src=hdr:name instead of header= as JWT source")
+		}
+
+		if k == "test" || strings.HasPrefix(k, "test_") {
+			typeAndArgs := strings.SplitN(v, ":", 2)
+			jka.claimTests = append(jka.claimTests, newClaimTest(typeAndArgs[0], typeAndArgs[1]))
 		}
 		if k != "src" && !strings.HasPrefix(k, "src_") {
 			continue
