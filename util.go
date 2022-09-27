@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -176,6 +177,7 @@ func GetRequestParam(param string, req *http.Request) (value string, solved bool
 				"b64dec":    base64.StdEncoding.DecodeString,
 				"b64decurl": base64.RawURLEncoding.DecodeString,
 				"json":      json.Marshal,
+				"atoi":      strconv.Atoi,
 				"stob":      func(s string) []byte { return []byte(s) },
 				"map": func(args ...interface{}) (map[string]interface{}, error) {
 					if len(args)%2 != 0 {
@@ -192,11 +194,17 @@ func GetRequestParam(param string, req *http.Request) (value string, solved bool
 				logf(req, logLevelError, "Error parsing template %#v: %s", tmplSrc, err)
 				return "", false, err
 			}
+			if os.Getenv("DEBUG_RP_TMPL") != "" {
+				logf(req, logLevelInfo, "compiled template: %s -> %s", param, string(tmplSrc))
+			}
 			tmplCache[name] = tmpl
 		}
 		buf := bytes.NewBuffer([]byte{})
 		if err := tmpl.Execute(buf, map[string]interface{}{"req": req}); err != nil {
 			return "", false, err
+		}
+		if os.Getenv("DEBUG_RP_TMPL") != "" {
+			logf(req, logLevelInfo, "executed template: %s -> %s", param, buf.String())
 		}
 		return buf.String(), true, nil
 	}

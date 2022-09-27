@@ -240,6 +240,7 @@ Several options support retrieving a value from request. The syntax is as follow
     - `rp <param> <req>` function is added to retrieve other parameters from request
     - `b64 <bytes>`, `b64url <bytes>`, `b64dec <str>`, `b64decurl <str>` encode/decode with normal/url encoding. decode returns values in []byte type, encode in string
     - `stob` convert string to bytes
+    - `atoi` convert string to integer
     - `map <key> <value> ...` create a map of values
     - `json` convert map to json []byte value
   - ex: `tmpl:env:ENV_TEMPLATE_VAR`, with `ENV_TEMPLATE_VAR` containing `eyJhbGciOiJIUzI1NiJ9.{{b64url (json (map "sub" (rp "q:sub" .req)))}}.{{rp "q:sig" .req}}`
