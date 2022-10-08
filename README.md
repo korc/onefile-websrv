@@ -67,6 +67,10 @@ websrv -h
       Host names (comma-separated) allowed for automatically issued ([ACME](https://en.wikipedia.org/wiki/Automatic_Certificate_Management_Environment)) certificates, -cert will be cache dir
   -acmehttp string
       Listen address for ACME http-01 challenge (default ":80")
+  -args-env string
+        read arguments from environment <prefix>1..<prefix>N (default "WEBSRV_ARG")
+  -args-file string
+        read args from file, one per line
   -auth value
       [<role>[+<role2>]=]<method>:<auth> (multi-arg)
   -cert string
@@ -96,6 +100,17 @@ websrv -h
 ```
 
 Options marked with `multi-arg` can be specified multiple times on command-line, and will add to previous configuration. Other options are meant to be set only once.
+
+#### Command-line through environment
+
+- by default, arguments can be also specified through environment variables `WEBSRV_ARG1` .. `WEBSRV_ARG<n>`
+  - the prefix of environment variable can be set via `-args-env` option
+
+#### Command-line from file
+
+- `-args-file` can be used to set a file to read arguments from, one per line
+- `-args-env` is processed before, so `WEBSRV_ARG1=-args-file WEBSRV_ARG2=/some/path/file` can be used to set that file via environment as well
+- `-args-file` is a multi-arg, and can be subsequently added via files themselves
 
 ### URL path mapping
 

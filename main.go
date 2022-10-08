@@ -45,15 +45,46 @@ func main() {
 		tls12Max      = flag.Bool("tls12max", false, "Use TLS1.2 as maximum supported version")
 		acmeHosts     = flag.String("acmehost", "",
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
+		argsEnvPrefix = flag.String("args-env", "WEBSRV_ARG", "read arguments from environment <prefix>1..<prefix>N")
 	)
-	var authFlag, aclFlag, urlMaps, corsMaps ArrayFlag
+	var authFlag, aclFlag, urlMaps, corsMaps, argsFiles ArrayFlag
 	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
+	flag.Var(&argsFiles, "args-file", "files to read arguments from (multi-arg)")
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
+
+	if *argsEnvPrefix != "" {
+		envArgs := []string{}
+		envArgsIdx := 1
+		for {
+			value, have := os.LookupEnv(fmt.Sprintf("%s%d", *argsEnvPrefix, envArgsIdx))
+			if !have {
+				break
+			}
+			envArgs = append(envArgs, value)
+			envArgsIdx++
+		}
+		flag.CommandLine.Parse(envArgs)
+	}
+
+	includedFiles := map[string]interface{}{}
+	for i := 0; i < len(argsFiles); i++ {
+		argsFile := argsFiles[i]
+		if _, have := includedFiles[argsFile]; have {
+			log.Printf("WARNING: cyclic inclusion: %#v", argsFile)
+			continue
+		}
+		includedFiles[argsFile] = true
+		if data, err := os.ReadFile(argsFile); err != nil {
+			log.Fatalf("cannot open args file %#v: %s", argsFile, err)
+		} else {
+			flag.CommandLine.Parse(strings.Split(string(data), "\n"))
+		}
+	}
 
 	currentLogLevel = logLevelInfo
 	for ll, lstr := range logLevelStr {
