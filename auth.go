@@ -13,7 +13,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"net"
 	"net/http"
@@ -193,7 +192,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 	case "Cert", "CertBy":
 		if strings.HasPrefix(check, "file:") {
 			fileName := check[5:]
-			data, err := ioutil.ReadFile(fileName)
+			data, err := os.ReadFile(fileName)
 			if err != nil {
 				logf(nil, logLevelFatal, "Cannot read file %#v: %s", fileName, err)
 			}

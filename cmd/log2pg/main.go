@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -19,7 +19,7 @@ type LogReceiver struct {
 }
 
 func (lr LogReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if body, err := ioutil.ReadAll(r.Body); err != nil {
+	if body, err := io.ReadAll(r.Body); err != nil {
 		log.Printf("Could not read body")
 	} else {
 		var insertId int

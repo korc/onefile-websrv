@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -43,7 +42,7 @@ func TestJWTtoJWT(t *testing.T) {
 		t.Errorf("bad response code: %d", resp.StatusCode)
 		return
 	}
-	retJwt, err := ioutil.ReadAll(resp.Body)
+	retJwt, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Errorf("can't read token: %s", err)
 		return
