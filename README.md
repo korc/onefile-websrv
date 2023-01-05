@@ -157,6 +157,8 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `del-hdr=x-header-name:x-header2-name` to remove request header from client
   - `set-hdr:x-header-name=VALUE` to set a request header
   - `no-xff=1` to remove X-Forwarded-For header containing client IP
+  - `verify=0` to allow making insecure HTTPS requests
+  - `ca=<filename>` to set remote RootCAs PEM file
 
 #### Example: Using HTTP handler with `wsprx` schema
 

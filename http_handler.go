@@ -3,11 +3,13 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -142,6 +144,32 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 	if prxHandler.Transport == nil {
 		prxHandler.Transport = http.DefaultTransport.(*http.Transport).Clone()
 	}
+
+	prxTransport := prxHandler.Transport.(*http.Transport)
+	if verifyFlag, ok := connectParams["verify"]; ok {
+		if v, err := strconv.ParseBool(verifyFlag); err == nil && !v {
+			if prxTransport.TLSClientConfig == nil {
+				prxTransport.TLSClientConfig = &tls.Config{}
+			}
+			prxTransport.TLSClientConfig.InsecureSkipVerify = true
+		} else if err != nil {
+			cfg.logger.Log(logLevelFatal, "cannot parse verify= value", map[string]interface{}{"verify": verifyFlag, "error": err})
+		}
+	}
+	if caCertFlag, ok := connectParams["ca"]; ok {
+		pemData, err := os.ReadFile(caCertFlag)
+		if err != nil {
+			cfg.logger.Log(logLevelFatal, "cannot read ca file", map[string]interface{}{"filename": caCertFlag, "error": err})
+		}
+		if prxTransport.TLSClientConfig == nil {
+			prxTransport.TLSClientConfig = &tls.Config{}
+		}
+		prxTransport.TLSClientConfig.RootCAs = x509.NewCertPool()
+		if !prxTransport.TLSClientConfig.RootCAs.AppendCertsFromPEM(pemData) {
+			cfg.logger.Log(logLevelFatal, "failed adding any root CAs", map[string]interface{}{"filename": caCertFlag})
+		}
+	}
+
 	for name, rt := range customHttpSchemas {
 		prxHandler.Transport.(*http.Transport).RegisterProtocol(name, rt())
 	}
