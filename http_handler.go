@@ -88,11 +88,20 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 			}
 			request.Header.Set(k[8:], connectParams[k])
 		}
-		if noXFF := connectParams["no-xff"]; noXFF != "" {
-			request.Header["X-Forwarded-For"] = nil
+		noXFF := false
+		if noXFFStr, have := connectParams["no-xff"]; have {
+			noXFF, err = strconv.ParseBool(noXFFStr)
+			if err != nil {
+				cfg.logger.Log(logLevelFatal, "cannot parse no-xff= value", map[string]interface{}{"no-xff": noXFFStr, "error": err})
+			}
+			if noXFF {
+				request.Header["X-Forwarded-For"] = nil
+			}
 		}
 		if cfg.certFile != "" {
-			request.Header.Set("X-Forwarded-Proto", "https")
+			if !noXFF {
+				request.Header.Set("X-Forwarded-Proto", "https")
+			}
 			if request.TLS != nil {
 				if fpHeader, ok := connectParams["fp-hdr"]; ok {
 					for _, crt := range request.TLS.PeerCertificates {
@@ -118,7 +127,9 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 				}
 			}
 		} else {
-			request.Header.Set("X-Forwarded-Proto", "http")
+			if !noXFF {
+				request.Header.Set("X-Forwarded-Proto", "http")
+			}
 		}
 	}
 
