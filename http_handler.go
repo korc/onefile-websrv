@@ -15,6 +15,20 @@ import (
 	"strings"
 )
 
+type fixWSHeadersTransport struct {
+	http.RoundTripper
+}
+
+func (dtr *fixWSHeadersTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	for header := range request.Header {
+		if strings.HasPrefix(header, "Sec-Websocket-") {
+			request.Header[strings.Replace(header, "Websocket", "WebSocket", 1)] = request.Header[header]
+			delete(request.Header, header)
+		}
+	}
+	return dtr.RoundTripper.RoundTrip(request)
+}
+
 func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 	connectParams, handlerParams := parseCurlyParams(params)
 	urlPathNoHost := urlPath[strings.Index(urlPath, "/"):]
@@ -191,6 +205,9 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 
 	for name, rt := range customHttpSchemas {
 		prxHandler.Transport.(*http.Transport).RegisterProtocol(name, rt())
+	}
+	if connectParams["fix-ws-hdr"] != "" {
+		prxHandler.Transport = &fixWSHeadersTransport{prxHandler.Transport}
 	}
 	return http.StripPrefix(urlPathNoHost, prxHandler)
 }

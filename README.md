@@ -159,6 +159,7 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `no-xff=1` to remove `X-Forwarded-For` header containing client IP and do not send `X-Forwarded-Proto`
   - `no-gzip=1` do not send `Accept-Encoding: gzip`
   - `verify=0` to allow making insecure HTTPS requests
+  - `fix-ws-hdr=1` make sure `Sec-Websocket-*` headers are sent as `Sec-WebSocket-*`
   - `ca=<filename>` to set remote RootCAs PEM file
 
 #### Example: Using HTTP handler with `wsprx` schema
