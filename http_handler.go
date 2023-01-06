@@ -157,6 +157,14 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 	}
 
 	prxTransport := prxHandler.Transport.(*http.Transport)
+	if noGzipFlag, ok := connectParams["no-gzip"]; ok {
+		if v, err := strconv.ParseBool(noGzipFlag); err == nil && v {
+			prxTransport.DisableCompression = true
+		} else if err != nil {
+			cfg.logger.Log(logLevelFatal, "cannot parse no-gzip= value", map[string]interface{}{"no-gzip": noGzipFlag, "error": err})
+		}
+	}
+
 	if verifyFlag, ok := connectParams["verify"]; ok {
 		if v, err := strconv.ParseBool(verifyFlag); err == nil && !v {
 			if prxTransport.TLSClientConfig == nil {

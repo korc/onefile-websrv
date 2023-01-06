@@ -156,7 +156,8 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
     -  `cert-hdr` hex-encoded client certificate
   - `del-hdr=x-header-name:x-header2-name` to remove request header from client
   - `set-hdr:x-header-name=VALUE` to set a request header
-  - `no-xff=1` to remove X-Forwarded-For header containing client IP
+  - `no-xff=1` to remove `X-Forwarded-For` header containing client IP and do not send `X-Forwarded-Proto`
+  - `no-gzip=1` do not send `Accept-Encoding: gzip`
   - `verify=0` to allow making insecure HTTPS requests
   - `ca=<filename>` to set remote RootCAs PEM file
 
