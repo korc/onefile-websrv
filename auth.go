@@ -679,6 +679,8 @@ func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			switch k {
 			case "JWTSecret", "JWTFilePat":
 				w.Header().Add("WWW-Authenticate", "Bearer realm=\"Authentication required\"")
+			case "HTTP":
+				w.Header().Add("WWW-Authenticate", "Basic realm=\"auth required\"")
 			case "Cert", "CertBy", "CertKeyHash":
 			default:
 				w.Header().Add("WWW-Authenticate", fmt.Sprintf("%s realm=\"auth-required\"", k))

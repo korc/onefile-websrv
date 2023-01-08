@@ -338,3 +338,13 @@ Several options support retrieving a value from request. The syntax is as follow
         - `re-path` treat auth value as regular expression, and `re-path` as pathname with `$<nr>` subgroup expansion pattern
           - ex: `-map /=webdav:/data/ -auth nofile=File:{no-file=1,re-path=/data/$1}/(.+) -auth ip4all=IPRange:0.0.0.0/0 -acl {PUT}^/=nofile -acl {GET}^/=ip4all -acl ^/=nobody`
             - create a WebDAV mapping for `/data/`, where you can upload only new files
+    - `HTTP`
+      - make a HTTP sub-request to URL at parameter
+        - if value starts with `tmpl:`, it will be processed as template in _Parameters from request_, documented above
+      - options set with `{..}`:
+        - `method` use something else than `GET`
+        - `need-hdr` colon-separated list of headers required to even start testing (ex. `Authorization`)
+        - `cp-hdr` colon-separated list of headers to copy from original request
+        - `set-hdr:xxx` set header `xxx` to a specified value when making request
+          - value can start with `tmpl:`, see above
+        - `success` response code which to be considered success
