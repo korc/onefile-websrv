@@ -152,7 +152,11 @@ func (hl *HTTPLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			requestLogged = true
 		}
 	}
-	logf(newReq, logLevelInfo, "src=%s host=%#v method=%#v uri=%#v ua=%#v clen=%d", r.RemoteAddr, r.Host, r.Method, r.RequestURI, r.UserAgent(), r.ContentLength)
+	var xffStr string
+	if xffStr = r.Header.Get("X-Forwarded-For"); xffStr != "" {
+		xffStr = " xff=" + xffStr
+	}
+	logf(newReq, logLevelInfo, "src=%s host=%#v method=%#v uri=%#v ua=%#v clen=%d%s", r.RemoteAddr, r.Host, r.Method, r.RequestURI, r.UserAgent(), r.ContentLength, xffStr)
 	hl.DefaultHandler.ServeHTTP(lw, newReq)
 	if requestLogged {
 		hl.remoteLogger.log("request-end", struct {
