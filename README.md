@@ -348,3 +348,10 @@ Several options support retrieving a value from request. The syntax is as follow
         - `set-hdr:xxx` set header `xxx` to a specified value when making request
           - value can start with `tmpl:`, see above
         - `success` response code which to be considered success
+    - `GeoIP`
+      - look up record from MaxMind's GeoIP database and check record value
+      - options via `{..}`
+        - `file=<filename.mmdb>` set database, MANDATORY
+        - `rprx=<ip1>:<ip2..>` list of reverse proxy servers for `X-Forwarded-For`, from closest to farthest
+        - `key=<a>:<b..>` set record value key, defaults to `country:iso_code`
+      - example usage: `-auth "jpn=GeoIP:{file=/usr/share/GeoIP/GeoLite2-Country.mmdb,rprx=127.0.0.1}JP"`
