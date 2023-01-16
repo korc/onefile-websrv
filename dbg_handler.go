@@ -140,6 +140,10 @@ func (jDbg *JSONDebugHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	outMap["remote"] = r.RemoteAddr
+	outMap["method"] = r.Method
+	outMap["host"] = r.Host
+	outMap["uri"] = r.RequestURI
+	outMap["proto"] = r.Proto
 	if jDbg.headers {
 		outMap["headers"] = r.Header
 	}
