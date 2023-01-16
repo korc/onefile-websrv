@@ -123,6 +123,12 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `websocket:` (alias `ws`) connects a websocket to TCP or UNIX socket
   - `http:` pass request to HTTP backend
   - `debug:` client request debug
+    - comma-separated options available after `:`
+      - `json` output data in JSON format
+      - `no-hdr` do not include request headers in JSON output
+      - `no-auth` do not include obtained roles info in json
+      - `path=x.y.z` show only defined path from JSON output (ex: `path=TLS.peers[0].cn`)
+      - `tls-cs` include full tls.ConnectionState in JSON output
   - `cgi:` Run a CGI script specified by `params`.
   - `jwt:` generate JWT token
   - `ws-proxy:` WebSocket proxy service, to be used with `ws_proxy`

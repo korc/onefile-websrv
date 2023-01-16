@@ -275,8 +275,6 @@ func main() {
 		handlerParams := urlHandler[handlerTypeIdx+1:]
 		logf(nil, logLevelInfo, "Handling %#v as %#v (%#v)", urlPath, urlHandler[:handlerTypeIdx], handlerParams)
 		switch urlHandler[:handlerTypeIdx] {
-		case "debug":
-			http.HandleFunc(urlPath, DebugRequest)
 		case "file":
 			http.Handle(urlPath, http.StripPrefix(urlPathNoHost, http.FileServer(http.Dir(handlerParams))))
 		case "webdav":
