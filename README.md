@@ -89,8 +89,6 @@ websrv -h
       [<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')
   -user string
       Switch to user (NOT RECOMMENDED)
-  -wdctype string
-      Fix content-type for Webdav GET/POST requests
   -cors value
       <path>=<allowed_origin> (multi-arg)
   -wstmout int
@@ -119,7 +117,8 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
 - additional `-map` entries add more mappings
 - supported `handler` types:
   - `file:` statically serve files from directory specified in `params`, or current working directory if empty
-  - `webdav:` WebDAV handler for directory `params`, or memory-only storage if empty
+  - `webdav:` WebDAV handler for directory `params`, or memory-only storage if empty. Options between `{..}` before path:
+    - `ctype=<CONTENT_TYPE>` use `CONTENT_TYPE` for file content type (was: `-wdctype`)
   - `websocket:` (alias `ws`) connects a websocket to TCP or UNIX socket
   - `http:` pass request to HTTP backend
   - `debug:` client request debug

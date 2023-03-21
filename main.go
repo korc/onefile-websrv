@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
-	"golang.org/x/net/webdav"
 )
 
 func main() {
@@ -37,7 +36,6 @@ func main() {
 		certFile      = flag.String("cert", "", "SSL certificate file or autocert cache dir")
 		certFileFb    = flag.String("cert-fallback", "", "Certificate file to use if ACME fails")
 		keyFile       = flag.String("key", "", "SSL key file")
-		wdCType       = flag.String("wdctype", "", "Fix content-type for Webdav GET/POST requests")
 		acmeHTTP      = flag.String("acmehttp", ":80", "Listen address for ACME http-01 challenge")
 		wsReadTimeout = flag.Duration("wstmout", 60*time.Second, "Websocket alive check timer in seconds")
 		loglevelFlag  = flag.String("loglevel", "info", "Max log level (one of "+strings.Join(logLevelStr, ", ")+")")
@@ -277,22 +275,6 @@ func main() {
 		switch urlHandler[:handlerTypeIdx] {
 		case "file":
 			http.Handle(urlPath, http.StripPrefix(urlPathNoHost, http.FileServer(http.Dir(handlerParams))))
-		case "webdav":
-			if !strings.HasSuffix(urlPath, "/") {
-				urlPath += "/"
-			}
-			var wdFS webdav.FileSystem
-			if handlerParams == "" {
-				wdFS = webdav.NewMemFS()
-			} else {
-				wdFS = webdav.Dir(handlerParams)
-			}
-			wdHandler := webdav.Handler{
-				FileSystem: wdFS,
-				LockSystem: webdav.NewMemLS(),
-				Prefix:     urlPathNoHost,
-			}
-			http.Handle(urlPath, DownloadOnlyHandler{ContentType: *wdCType, Handler: &wdHandler})
 		case "websocket", "ws":
 			http.Handle(urlPath, newWebSocketHandler(handlerParams).setReadTimeout(*wsReadTimeout))
 		default:
@@ -308,7 +290,7 @@ func main() {
 					keys = append(keys, k)
 				}
 
-				logf(nil, logLevelFatal, "Handler type %#v unknown, available: debug file webdav websocket(ws) http cgi %s",
+				logf(nil, logLevelFatal, "Handler type %#v unknown, available: file, websocket(ws), %s",
 					urlHandler[:handlerTypeIdx], strings.Join(keys, ", "))
 			}
 		}

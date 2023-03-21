@@ -32,3 +32,24 @@ func (dh DownloadOnlyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	dh.Handler.ServeHTTP(w, r)
 }
+
+func init() {
+	addProtocolHandler("webdav", func(urlPath, p string, cfg *serverConfig) (http.Handler, error) {
+		if !strings.HasSuffix(urlPath, "/") {
+			urlPath += "/"
+		}
+		var wdFS webdav.FileSystem
+		opts, params := parseCurlyParams(p)
+		if params == "" {
+			wdFS = webdav.NewMemFS()
+		} else {
+			wdFS = webdav.Dir(params)
+		}
+		wdHandler := webdav.Handler{
+			FileSystem: wdFS,
+			LockSystem: webdav.NewMemLS(),
+			Prefix:     urlPath[strings.Index(urlPath, "/"):],
+		}
+		return DownloadOnlyHandler{ContentType: opts["ctype"], Handler: &wdHandler}, nil
+	})
+}
