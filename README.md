@@ -119,6 +119,7 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `file:` statically serve files from directory specified in `params`, or current working directory if empty
   - `webdav:` WebDAV handler for directory `params`, or memory-only storage if empty. Options between `{..}` before path:
     - `ctype=<CONTENT_TYPE>` use `CONTENT_TYPE` for file content type (was: `-wdctype`)
+    - `unsafe=1` use `webdav.Dir` instead of symlink-checking (more safe) custom FS provider
   - `websocket:` (alias `ws`) connects a websocket to TCP or UNIX socket
   - `http:` pass request to HTTP backend
   - `debug:` client request debug
