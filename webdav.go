@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
+	"log"
 	"net/http"
+	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -33,6 +37,45 @@ func (dh DownloadOnlyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	dh.Handler.ServeHTTP(w, r)
 }
 
+type wdFSType string
+
+func (wd wdFSType) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+	return webdav.Dir(wd).Mkdir(ctx, name, perm)
+}
+
+func (wd wdFSType) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
+	fullPath, err := filepath.EvalSymlinks(path.Join(string(wd), name))
+	if err != nil {
+		log.Printf("Could not evaluate full path for: %#q + %q: %s", wd, name, err)
+		return nil, err
+	}
+
+	target, err := filepath.Rel(string(wd), fullPath)
+	if err != nil {
+		log.Printf("Error finding relative path of %#q+%#q: %s", wd, fullPath, err)
+		return nil, err
+	}
+
+	if strings.HasPrefix(target, "../") {
+		log.Printf("ERROR: use {unsafe=1} to allow accessing symlinks outside WebDAV root %#q + %#q -> %#q", wd, name, target)
+		return nil, filepath.ErrBadPattern
+	}
+
+	return webdav.Dir(wd).OpenFile(ctx, name, flag, perm)
+}
+
+func (wd wdFSType) RemoveAll(ctx context.Context, name string) error {
+	return webdav.Dir(wd).RemoveAll(ctx, name)
+}
+
+func (wd wdFSType) Rename(ctx context.Context, oldName, newName string) error {
+	return webdav.Dir(wd).Rename(ctx, oldName, newName)
+}
+
+func (wd wdFSType) Stat(ctx context.Context, name string) (os.FileInfo, error) {
+	return webdav.Dir(wd).Stat(ctx, name)
+}
+
 func init() {
 	addProtocolHandler("webdav", func(urlPath, p string, cfg *serverConfig) (http.Handler, error) {
 		if !strings.HasSuffix(urlPath, "/") {
@@ -42,8 +85,10 @@ func init() {
 		opts, params := parseCurlyParams(p)
 		if params == "" {
 			wdFS = webdav.NewMemFS()
-		} else {
+		} else if opts["unsafe"] != "" {
 			wdFS = webdav.Dir(params)
+		} else {
+			wdFS = wdFSType(params)
 		}
 		wdHandler := webdav.Handler{
 			FileSystem: wdFS,
