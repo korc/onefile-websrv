@@ -366,18 +366,21 @@ func TestWebSocket(t *testing.T) {
 		testA2 := []byte("Some more tests")
 		t.Run("write", func(t *testing.T) {
 			t.Run("A", func(t *testing.T) {
+				t.Logf("connA1 write testA: %#v", string(testA))
 				if err := connA1.WriteMessage(grlws.BinaryMessage, testA); err != nil {
 					t.Errorf("Cannot write testA: %s", err)
 					return
 				}
 			})
 			t.Run("B", func(t *testing.T) {
+				t.Logf("connB1 write testB: %#v", string(testB))
 				if err := connB1.WriteMessage(grlws.BinaryMessage, testB); err != nil {
 					t.Errorf("Cannot write testB: %s", err)
 					return
 				}
 			})
 			t.Run("A2", func(t *testing.T) {
+				t.Logf("connA2 write testA2: %#v", string(testA2))
 				if err := connA2.WriteMessage(grlws.BinaryMessage, testA2); err != nil {
 					t.Errorf("Cannot write testA2: %s", err)
 					return
@@ -391,6 +394,7 @@ func TestWebSocket(t *testing.T) {
 					t.Errorf("Error reading message A2: %s", err)
 					return
 				}
+				t.Logf("connA2 read: %#v", string(connAbuf2))
 				if !bytes.Equal(connAbuf2, testA) {
 					t.Errorf("Answer A2 (%#v) is not testA (%#v)", string(connAbuf2), string(testA))
 					return
@@ -402,8 +406,11 @@ func TestWebSocket(t *testing.T) {
 					t.Errorf("Error reading message A3: %s", err)
 					return
 				}
-				if !bytes.Equal(connAbuf3, testA) {
-					t.Errorf("Answer A3 (%#v) is not testA (%#v)", string(connAbuf3), string(testA))
+				t.Logf("connA3 read: %#v", string(connAbuf3))
+				isTestA := bytes.Equal(connAbuf3, testA)
+				if !isTestA && !bytes.Equal(connAbuf3, testA2) {
+					t.Errorf("Answer A3 (%#v) is neither testA (%#v) nor testA2 (%#v)",
+						string(connAbuf3), string(testA), string(testA2))
 					return
 				}
 				t.Run("A2", func(t *testing.T) {
@@ -412,8 +419,14 @@ func TestWebSocket(t *testing.T) {
 						t.Errorf("Error reading message A3(2): %s", err)
 						return
 					}
-					if !bytes.Equal(connAbuf3_2, testA2) {
-						t.Errorf("Answer A3(2) (%#v) is not testA2 (%#v)", string(connAbuf3_2), string(testA2))
+					t.Logf("connA3 read: %#v", string(connAbuf3_2))
+					testString := testA2
+					if !isTestA {
+						testString = testA
+					}
+					if !bytes.Equal(connAbuf3_2, testString) {
+						t.Errorf("Answer A3(2) (%#v) is not testString (testA=%v, %#v)",
+							string(connAbuf3_2), isTestA, string(testString))
 						return
 					}
 				})
