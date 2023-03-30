@@ -241,7 +241,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 				ah.Auths[jwtCheckLoc][jwtCheckParam] = method + ":" + check
 			}
 		}
-	case "Basic", "IPRange":
+	case "Basic":
 	default:
 		if creator, have := authMethods[method]; have {
 			authn, err := creator(check, strings.Split(name, "+"))
@@ -250,7 +250,7 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 			}
 			ah.Authenticators = append(ah.Authenticators, authn)
 		} else {
-			available := []string{"Basic", "Cert", "CertBy", "CertKeyHash", "JWTSecret", "JWTFilePat", "IPRange"}
+			available := []string{"Basic", "Cert", "CertBy", "CertKeyHash", "JWTSecret", "JWTFilePat"}
 			for m := range authMethods {
 				available = append(available, m)
 			}
@@ -370,27 +370,6 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	}
 
 	haveRoles := make(map[string]bool)
-
-	if ipRanges, ok := ah.Auths["IPRange"]; ok {
-		remoteHostName, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			logf(r, logLevelError, "Cannot parse remote host address: %s", err)
-			return r, err
-		}
-		remoteHost := net.ParseIP(remoteHostName)
-		for ipRange := range ipRanges {
-			_, ipNet, err := net.ParseCIDR(ipRange)
-			if err != nil {
-				logf(r, logLevelError, "IP range %#v parse error: %s", ipRange, err)
-				return r, err
-			}
-			if ipNet.Contains(remoteHost) {
-				for _, gotRole := range strings.Split(ah.Auths["IPRange"][ipRange], "+") {
-					haveRoles[gotRole] = ah.ACLs == nil
-				}
-			}
-		}
-	}
 
 	if authHdr := r.Header.Get("Authorization"); authHdr != "" {
 		authFields := strings.SplitN(authHdr, " ", 2)

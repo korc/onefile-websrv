@@ -324,6 +324,8 @@ Several options support retrieving a value from request. The syntax is as follow
     - `IPRange`
       - checks client's remote IP
       - `auth` is IP address with network mask length in format of `ip/masklen`
+      - can start with `file:` to read ip ranges from file, lines starting with `#` are ignored
+      - `{xff=..}` colon-separated list of reverse proxy IP's which can set `X-Forwarded-For` header for client IP
     - `JWTFilePat` *DEPRECATED*
       - `auth` specifies file (pattern) containing accepted JWT tokens signed with:
         - secrets, in format of `hash:url-base64-encoded-secret`

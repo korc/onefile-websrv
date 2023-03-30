@@ -46,6 +46,59 @@ func TestAuthHost(t *testing.T) {
 	})
 }
 
+func TestIPRange(t *testing.T) {
+	ah := &AuthHandler{}
+	ah.AddAuth("IPRange", "{xff=127.0.0.1}127.0.0.2/32", "authok")
+	tmpFile, err := os.CreateTemp("", "auth-iprange-*")
+	if err != nil {
+		t.Fatalf("Cannot create tmp file: %s", err)
+	}
+	defer tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+	tmpFile.WriteString(`
+# internal IPs
+  192.168.0.0/24
+
+# external OK
+1.2.3.4/32`)
+	ah.AddAuth("IPRange", "file:"+tmpFile.Name(), "ip-range-file")
+
+	t.Run("xff", func(t *testing.T) {
+		t.Run("direct", func(t *testing.T) {
+			_, err := ah.checkAuthPass(&http.Request{Header: http.Header{}, URL: &url.URL{}, Method: "GET", RemoteAddr: "127.0.0.1:12345"})
+			if err == nil {
+				t.Error("should not pass without XFF header")
+			}
+		})
+		t.Run("with-xff", func(t *testing.T) {
+			_, err := ah.checkAuthPass(&http.Request{Header: http.Header{"X-Forwarded-For": []string{"127.0.0.2"}}, URL: &url.URL{}, Method: "GET", RemoteAddr: "127.0.0.1:12345"})
+			if err != nil {
+				t.Error("should pass with XFF header")
+			}
+		})
+	})
+	t.Run("file", func(t *testing.T) {
+		t.Run("good-1234", func(t *testing.T) {
+			_, err := ah.checkAuthPass(&http.Request{Header: http.Header{}, URL: &url.URL{}, Method: "GET", RemoteAddr: "1.2.3.4:12345"})
+			if err != nil {
+				t.Error("should pass from 1.2.3.4")
+			}
+		})
+		t.Run("good-192", func(t *testing.T) {
+			_, err := ah.checkAuthPass(&http.Request{Header: http.Header{}, URL: &url.URL{}, Method: "GET", RemoteAddr: "192.168.0.10:12345"})
+			if err != nil {
+				t.Error("should pass from 192.168.0.*")
+			}
+		})
+		t.Run("bad-192", func(t *testing.T) {
+			_, err := ah.checkAuthPass(&http.Request{Header: http.Header{}, URL: &url.URL{}, Method: "GET", RemoteAddr: "192.168.1.10:12345"})
+			if err == nil {
+				t.Error("should not pass from 192.168.1.*")
+			}
+		})
+	})
+}
+
 func TestFileWithIPRange(t *testing.T) {
 	ah := &AuthHandler{}
 	tmpDir := os.TempDir()
