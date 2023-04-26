@@ -45,12 +45,13 @@ func main() {
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 		argsEnvPrefix = flag.String("args-env", "WEBSRV_ARG", "read arguments from environment <prefix>1..<prefix>N")
 	)
-	var authFlag, aclFlag, urlMaps, corsMaps, argsFiles ArrayFlag
+	var authFlag, aclFlag, urlMaps, corsMaps, argsFiles, addHeaders ArrayFlag
 	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
 	flag.Var(&argsFiles, "args-file", "files to read arguments from (multi-arg)")
+	flag.Var(&addHeaders, "add-hdr", "add header ['*']<path_re>=<header_name>:<value_req_p> (multi-arg)")
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	flag.Parse()
@@ -109,8 +110,17 @@ func main() {
 	var defaultHandler http.Handler
 	haveCertAuth := false
 
+	if len(addHeaders) > 0 {
+		defaultHandler = &ModifyHeaderHandler{NextHandler: defaultHandler}
+		for _, opt := range addHeaders {
+			if err := defaultHandler.(*ModifyHeaderHandler).ParseAddHdr(opt); err != nil {
+				logf(nil, logLevelFatal, "cannot add header option: %s", err)
+			}
+		}
+	}
+
 	if len(authFlag) > 0 {
-		defaultHandler = &AuthHandler{}
+		defaultHandler = &AuthHandler{DefaultHandler: defaultHandler}
 		for _, auth := range authFlag {
 			methodIdx := strings.Index(auth, ":")
 			tagIdx := strings.Index(auth, "=")
