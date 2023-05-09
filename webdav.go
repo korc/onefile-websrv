@@ -73,6 +73,7 @@ func (wd wdFSType) OpenFile(ctx context.Context, name string, flag int, perm os.
 			log.Printf("ERROR: use {unsafe=1} to allow accessing symlinks outside WebDAV root %#q + %#q -> %#q", testPath, n, target)
 			return nil, filepath.ErrBadPattern
 		}
+		testPath = fullPath
 	}
 	return webdav.Dir(wd).OpenFile(ctx, name, flag, perm)
 }
