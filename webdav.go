@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"golang.org/x/net/webdav"
 )
@@ -44,23 +46,34 @@ func (wd wdFSType) Mkdir(ctx context.Context, name string, perm os.FileMode) err
 }
 
 func (wd wdFSType) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	fullPath, err := filepath.EvalSymlinks(path.Join(string(wd), name))
-	if err != nil {
-		log.Printf("Could not evaluate full path for: %#q + %q: %s", wd, name, err)
-		return nil, err
-	}
+	testPath := string(wd)
+	for _, n := range strings.Split(name, "/") {
+		fullPath, err := filepath.EvalSymlinks(path.Join(testPath, n))
+		if err != nil {
+			if err1, ok := err.(*fs.PathError); ok && err1.Err == syscall.ENOENT && flag&os.O_CREATE == os.O_CREATE {
+				parent, err2 := filepath.EvalSymlinks(testPath)
+				if err2 != nil {
+					log.Printf("Could not evaluate parent full path for: %#q: %s", testPath, err)
+					return nil, err
+				}
+				fullPath = path.Join(parent, n)
+			} else {
+				log.Printf("Could not evaluate full path for: %#q + %q: %s", testPath, n, err)
+				return nil, err
+			}
+		}
 
-	target, err := filepath.Rel(string(wd), fullPath)
-	if err != nil {
-		log.Printf("Error finding relative path of %#q+%#q: %s", wd, fullPath, err)
-		return nil, err
-	}
+		target, err := filepath.Rel(testPath, fullPath)
+		if err != nil {
+			log.Printf("Error finding relative path of %#q+%#q: %s", testPath, fullPath, err)
+			return nil, err
+		}
 
-	if strings.HasPrefix(target, "../") {
-		log.Printf("ERROR: use {unsafe=1} to allow accessing symlinks outside WebDAV root %#q + %#q -> %#q", wd, name, target)
-		return nil, filepath.ErrBadPattern
+		if strings.HasPrefix(target, "../") {
+			log.Printf("ERROR: use {unsafe=1} to allow accessing symlinks outside WebDAV root %#q + %#q -> %#q", testPath, n, target)
+			return nil, filepath.ErrBadPattern
+		}
 	}
-
 	return webdav.Dir(wd).OpenFile(ctx, name, flag, perm)
 }
 
@@ -76,25 +89,27 @@ func (wd wdFSType) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	return webdav.Dir(wd).Stat(ctx, name)
 }
 
+func NewDavHandler(urlPath, p string, cfg *serverConfig) (http.Handler, error) {
+	if !strings.HasSuffix(urlPath, "/") {
+		urlPath += "/"
+	}
+	var wdFS webdav.FileSystem
+	opts, params := parseCurlyParams(p)
+	if params == "" {
+		wdFS = webdav.NewMemFS()
+	} else if opts["unsafe"] != "" {
+		wdFS = webdav.Dir(params)
+	} else {
+		wdFS = wdFSType(params)
+	}
+	wdHandler := webdav.Handler{
+		FileSystem: wdFS,
+		LockSystem: webdav.NewMemLS(),
+		Prefix:     urlPath[strings.Index(urlPath, "/"):],
+	}
+	return DownloadOnlyHandler{ContentType: opts["ctype"], Handler: &wdHandler}, nil
+}
+
 func init() {
-	addProtocolHandler("webdav", func(urlPath, p string, cfg *serverConfig) (http.Handler, error) {
-		if !strings.HasSuffix(urlPath, "/") {
-			urlPath += "/"
-		}
-		var wdFS webdav.FileSystem
-		opts, params := parseCurlyParams(p)
-		if params == "" {
-			wdFS = webdav.NewMemFS()
-		} else if opts["unsafe"] != "" {
-			wdFS = webdav.Dir(params)
-		} else {
-			wdFS = wdFSType(params)
-		}
-		wdHandler := webdav.Handler{
-			FileSystem: wdFS,
-			LockSystem: webdav.NewMemLS(),
-			Prefix:     urlPath[strings.Index(urlPath, "/"):],
-		}
-		return DownloadOnlyHandler{ContentType: opts["ctype"], Handler: &wdHandler}, nil
-	})
+	addProtocolHandler("webdav", NewDavHandler)
 }
