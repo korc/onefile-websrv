@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
 
 var exitOnBadStatus = false
+var connCount atomic.Uint64
 
 const bufSize = 32 * 1024
 
@@ -23,10 +25,11 @@ const bufSize = 32 * 1024
 func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, src io.ReadCloser) error {
 	defer dst.Close()
 	defer src.Close()
-	log.Printf("Dialing to %s", location)
+	connNum := connCount.Add(1)
+	log.Printf("[%d] Dialing to %s", connNum, location)
 	ws, resp, err := websocket.DefaultDialer.Dial(location, headers)
 	if err != nil {
-		log.Printf("Could not connect: %s (resp=%#v)", err, resp)
+		log.Printf("[%d] Could not connect: %s (resp=%#v)", connNum, err, resp)
 		if exitOnBadStatus && (resp == nil || resp.StatusCode == http.StatusBadRequest) {
 			os.Exit(100)
 		}
@@ -34,7 +37,7 @@ func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, sr
 	}
 	defer ws.Close()
 
-	log.Printf("Connected, transferring data")
+	log.Printf("[%d] Connected, transferring data", connNum)
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -43,18 +46,18 @@ func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, sr
 		defer ws.Close()
 		defer src.Close()
 		defer dst.Close()
-		defer log.Printf("local closed the socket")
+		defer log.Printf("[%d] local closed the socket", connNum)
 		for {
 			buf := make([]byte, bufSize)
 			nRead, err := src.Read(buf)
 			if err != nil {
 				if err != io.EOF {
-					log.Printf("Error reading socket: %s", err)
+					log.Printf("[%d] Error reading socket: %s", connNum, err)
 				}
 				break
 			}
 			if err := ws.WriteMessage(websocket.BinaryMessage, buf[:nRead]); err != nil {
-				log.Printf("Error writing WS: %s", err)
+				log.Printf("[%d] Error writing WS: %s", connNum, err)
 				break
 			}
 		}
@@ -64,12 +67,12 @@ func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, sr
 		defer ws.Close()
 		defer dst.Close()
 		defer src.Close()
-		defer log.Printf("remote closed the socket")
+		defer log.Printf("[%d] remote closed the socket", connNum)
 		for {
 			msgType, buf, err := ws.ReadMessage()
 			if err != nil {
 				if err != io.EOF {
-					log.Printf("Error reading WS (%d): %s", msgType, err)
+					log.Printf("[%d] Error reading WS (%d): %s", connNum, msgType, err)
 				}
 				break
 			}
@@ -77,7 +80,7 @@ func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, sr
 			for toWrite > 0 {
 				nWritten, err := dst.Write(buf)
 				if err != nil {
-					log.Print("Error writing socket: ", err)
+					log.Printf("[%d] Error writing socket: %s", connNum, err)
 					break
 				}
 				buf = buf[nWritten:]
@@ -86,7 +89,7 @@ func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, sr
 		}
 	}()
 	wg.Wait()
-	log.Printf("finished")
+	log.Printf("[%d] finished", connNum)
 	return nil
 }
 
