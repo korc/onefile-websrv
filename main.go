@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/crypto/acme/autocert"
@@ -31,8 +30,6 @@ func main() {
 	}
 	var (
 		listenAddr    = flag.String("listen", ":80", "Listen ip:port or /path/to/unix-socket")
-		chroot        = flag.String("chroot", "", "chroot() to directory after start")
-		userName      = flag.String("user", "", "Switch to user (NOT RECOMMENDED)")
 		certFile      = flag.String("cert", "", "SSL certificate file or autocert cache dir")
 		certFileFb    = flag.String("cert-fallback", "", "Certificate file to use if ACME fails")
 		keyFile       = flag.String("key", "", "SSL key file")
@@ -45,6 +42,15 @@ func main() {
 			"Autocert hostnames (comma-separated), -cert will be cache dir")
 		argsEnvPrefix = flag.String("args-env", "WEBSRV_ARG", "read arguments from environment <prefix>1..<prefix>N")
 	)
+	var chroot *string
+	if canChroot {
+		chroot = flag.String("chroot", "", "chroot() to directory after start")
+	}
+	var userName *string
+	if canSetregid && canSetreuid {
+		userName = flag.String("user", "", "Switch to user (NOT RECOMMENDED)")
+	}
+
 	var authFlag, aclFlag, urlMaps, corsMaps, argsFiles, addHeaders ArrayFlag
 	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
@@ -248,7 +254,7 @@ func main() {
 		if err := os.Chdir(*chroot); err != nil {
 			logf(nil, logLevelFatal, "Cannot chdir to %#v: %v", *chroot, err)
 		}
-		if err := syscall.Chroot("."); err != nil {
+		if err := Chroot("."); err != nil {
 			logf(nil, logLevelFatal, "Changing root to %#v failed: %s", *chroot, err)
 		}
 		logf(nil, logLevelInfo, "Changed root to %#v", *chroot)
@@ -256,10 +262,10 @@ func main() {
 	if switchToUser != nil {
 		gid, _ := strconv.Atoi(switchToUser.Gid)
 		uid, _ := strconv.Atoi(switchToUser.Uid)
-		if err := syscall.Setregid(gid, gid); err != nil {
+		if err := Setregid(gid, gid); err != nil {
 			logf(nil, logLevelFatal, "Could not switch to gid %v: %v", gid, err)
 		}
-		if err := syscall.Setreuid(uid, uid); err != nil {
+		if err := Setreuid(uid, uid); err != nil {
 			logf(nil, logLevelFatal, "Could not switch to uid %v: %v", uid, err)
 		}
 		logf(nil, logLevelInfo, "Changed to user %v/%v", uid, gid)
