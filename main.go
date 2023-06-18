@@ -105,7 +105,7 @@ func main() {
 	}
 
 	var switchToUser *user.User
-	if *userName != "" {
+	if userName != nil && *userName != "" {
 		var err error
 		logf(nil, logLevelWarning, "Switch to user is discouraged, cf. https://github.com/golang/go/issues/1435")
 		if switchToUser, err = user.Lookup(*userName); err != nil {
@@ -250,7 +250,7 @@ func main() {
 	} else {
 		logf(nil, logLevelWarning, "SSL not enabled")
 	}
-	if *chroot != "" {
+	if chroot != nil && *chroot != "" {
 		if err := os.Chdir(*chroot); err != nil {
 			logf(nil, logLevelFatal, "Cannot chdir to %#v: %v", *chroot, err)
 		}
