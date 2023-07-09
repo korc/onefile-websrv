@@ -238,9 +238,16 @@ func main() {
 		if *tls12Max {
 			tlsConfig.MaxVersion = tls.VersionTLS12
 		}
-		if authHandler != nil && authHandler.HaveCertAuth {
-			tlsConfig.ClientAuth = tls.RequestClientCert
-			logf(nil, logLevelInfo, "X509 auth enabled")
+		if authHandler != nil {
+			hostCAs := authHandler.ConfigureServerTLSConfig(tlsConfig)
+			hostCASubjects := map[string][]string{}
+			for host := range hostCAs {
+				hostCASubjects[host] = nil
+				for _, crt := range hostCAs[host] {
+					hostCASubjects[host] = append(hostCASubjects[host], crt.Subject.String())
+				}
+			}
+			logf(nil, logLevelInfo, "X509 auth: %v", hostCASubjects)
 		}
 		ln = tls.NewListener(ln, tlsConfig)
 		logf(nil, logLevelInfo, "SSL enabled, cert=%s", *certFile)

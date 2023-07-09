@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
@@ -67,6 +68,7 @@ type AuthHandler struct {
 	Authenticators []Authenticator
 	ACLs           []ACLRecord
 	HaveCertAuth   bool
+	certRoleCAs    map[string][]*x509.Certificate
 }
 
 const jwtParams = `(cookie|header|query)=([A-Za-z0-9_-]+)`
@@ -127,11 +129,98 @@ func sshKeysToPEM(in []byte) (out []byte) {
 	return
 }
 
+func (ah *AuthHandler) ClientAuthHostsCAs() (hostMap map[string][]*x509.Certificate) {
+	acls := ah.ACLs
+	if acls == nil {
+		acls = []ACLRecord{{RolesToCheck: map[string]interface{}{}}}
+		for role := range ah.certRoleCAs {
+			acls[0].RolesToCheck[role] = true
+		}
+	}
+	for _, acl := range acls {
+		haveCertRoles := false
+		caCerts := []*x509.Certificate{}
+		for role := range acl.RolesToCheck {
+			if roleCerts, have := ah.certRoleCAs[role]; have {
+				haveCertRoles = true
+				if caCerts == nil || roleCerts == nil {
+					caCerts = nil
+				} else {
+					caCerts = append(caCerts, roleCerts...)
+				}
+			}
+		}
+		if !haveCertRoles {
+			continue
+		}
+		if hostMap == nil {
+			hostMap = make(map[string][]*x509.Certificate)
+		}
+		hosts := acl.Hosts
+		if hosts == nil {
+			hosts = map[string]bool{"*": true}
+		}
+		for host := range hosts {
+			if caCerts == nil {
+				hostMap[host] = nil
+			} else if curList, have := hostMap[host]; curList != nil || !have {
+				hostMap[host] = append(curList, caCerts...)
+			}
+		}
+	}
+	return
+}
+
+func (ah *AuthHandler) ConfigureServerTLSConfig(cfg *tls.Config) (hostToCAsMap map[string][]*x509.Certificate) {
+	if !ah.HaveCertAuth {
+		return
+	}
+	hostToCAsMap = ah.ClientAuthHostsCAs()
+	globalCAs, haveGlobal := hostToCAsMap["*"]
+	if haveGlobal && (len(hostToCAsMap) == 1 || globalCAs == nil) {
+		cfg.ClientAuth = tls.RequestClientCert
+		if globalCAs != nil {
+			cfg.ClientCAs = x509.NewCertPool()
+			for _, cert := range globalCAs {
+				cfg.ClientCAs.AddCert(cert)
+			}
+			return
+		}
+	}
+
+	cfg.GetConfigForClient = func(chi *tls.ClientHelloInfo) (ret *tls.Config, err error) {
+		hostCAs, haveHost := hostToCAsMap[chi.ServerName]
+		if haveHost || haveGlobal {
+			ret = cfg.Clone()
+			ret.ClientAuth = tls.RequestClientCert
+			if (haveHost && hostCAs == nil) || (haveGlobal && globalCAs == nil) {
+				return
+			}
+			ret.ClientCAs = x509.NewCertPool()
+			if haveHost {
+				for _, cert := range hostCAs {
+					ret.ClientCAs.AddCert(cert)
+				}
+			}
+			if haveGlobal {
+				for _, cert := range globalCAs {
+					ret.ClientCAs.AddCert(cert)
+				}
+			}
+		}
+		return
+	}
+	return
+}
+
 // AddAuth : add authentication method to identify role(s)
 func (ah *AuthHandler) AddAuth(method, check, name string) {
 	switch method {
 	case "Cert", "CertBy", "CertKeyHash":
 		ah.HaveCertAuth = true
+		if ah.certRoleCAs == nil {
+			ah.certRoleCAs = make(map[string][]*x509.Certificate)
+		}
 	}
 
 	if ah.Auths == nil {
@@ -152,6 +241,9 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 
 	switch method {
 	case "CertKeyHash":
+		for _, role := range strings.Split(name, "+") {
+			ah.certRoleCAs[role] = nil
+		}
 		if strings.HasPrefix(check, "file:") {
 			fileName := check[5:]
 			data, err := os.ReadFile(fileName)
@@ -230,6 +322,24 @@ func (ah *AuthHandler) AddAuth(method, check, name string) {
 			}
 			logf(nil, logLevelInfo, "Read %d certificates from %#v for role %#v", nrDone, fileName, name)
 			return
+		} else if method == "CertBy" {
+			certBytes, err := hex.DecodeString(check)
+			if err != nil {
+				logf(nil, logLevelFatal, "decoding hex: %s: %#v", check)
+			}
+			cert, err := x509.ParseCertificate(certBytes)
+			if err != nil {
+				logf(nil, logLevelFatal, "parsing cert: %s: %#v", check)
+			}
+			for _, role := range strings.Split(name, "+") {
+				if pool, have := ah.certRoleCAs[role]; !have || pool != nil {
+					ah.certRoleCAs[role] = append(pool, cert)
+				}
+			}
+		} else {
+			for _, role := range strings.Split(name, "+") {
+				ah.certRoleCAs[role] = nil
+			}
 		}
 	case "JWTSecret", "JWTFilePat":
 		logf(nil, logLevelWarning, "DEPRECATED: please use JWT auth method instead of %#v", method)
