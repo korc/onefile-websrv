@@ -66,6 +66,7 @@ type AuthHandler struct {
 	Auths          map[string]map[string]string
 	Authenticators []Authenticator
 	ACLs           []ACLRecord
+	HaveCertAuth   bool
 }
 
 const jwtParams = `(cookie|header|query)=([A-Za-z0-9_-]+)`
@@ -128,6 +129,11 @@ func sshKeysToPEM(in []byte) (out []byte) {
 
 // AddAuth : add authentication method to identify role(s)
 func (ah *AuthHandler) AddAuth(method, check, name string) {
+	switch method {
+	case "Cert", "CertBy", "CertKeyHash":
+		ah.HaveCertAuth = true
+	}
+
 	if ah.Auths == nil {
 		ah.Auths = make(map[string]map[string]string)
 	}

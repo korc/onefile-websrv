@@ -114,7 +114,7 @@ func main() {
 	}
 
 	var defaultHandler http.Handler
-	haveCertAuth := false
+	var authHandler *AuthHandler
 
 	if len(addHeaders) > 0 {
 		defaultHandler = &ModifyHeaderHandler{NextHandler: defaultHandler}
@@ -126,7 +126,8 @@ func main() {
 	}
 
 	if len(authFlag) > 0 {
-		defaultHandler = &AuthHandler{DefaultHandler: defaultHandler}
+		authHandler = &AuthHandler{DefaultHandler: defaultHandler}
+		defaultHandler = authHandler
 		for _, auth := range authFlag {
 			methodIdx := strings.Index(auth, ":")
 			tagIdx := strings.Index(auth, "=")
@@ -137,10 +138,6 @@ func main() {
 				tagIdx = -1
 			}
 			authMethod := auth[tagIdx+1 : methodIdx]
-			switch authMethod {
-			case "Cert", "CertBy", "CertKeyHash":
-				haveCertAuth = true
-			}
 			defaultHandler.(*AuthHandler).AddAuth(authMethod, auth[methodIdx+1:], role)
 		}
 		if len(aclFlag) > 0 {
@@ -241,7 +238,7 @@ func main() {
 		if *tls12Max {
 			tlsConfig.MaxVersion = tls.VersionTLS12
 		}
-		if haveCertAuth {
+		if authHandler != nil && authHandler.HaveCertAuth {
 			tlsConfig.ClientAuth = tls.RequestClientCert
 			logf(nil, logLevelInfo, "X509 auth enabled")
 		}
