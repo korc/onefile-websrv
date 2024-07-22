@@ -52,7 +52,10 @@ func main() {
 	}
 
 	var authFlag, aclFlag, urlMaps, corsMaps, argsFiles, addHeaders ArrayFlag
-	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
+	var x509Pat AuthX509PatFlag
+	flag.Var(&authFlag, "auth", "alias to 'role'")
+	flag.Var(&authFlag, "role", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
+	flag.Var(&x509Pat, "x509-pat", "{'*'|'*.'<domain>|<servername>}={'none'|[!]'any'} (multi-arg, default '*=any' if have cert auth or '*=none' otherwise)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
@@ -238,16 +241,27 @@ func main() {
 		if *tls12Max {
 			tlsConfig.MaxVersion = tls.VersionTLS12
 		}
-		if authHandler != nil {
-			hostCAs := authHandler.ConfigureServerTLSConfig(tlsConfig)
-			hostCASubjects := map[string][]string{}
-			for host := range hostCAs {
-				hostCASubjects[host] = nil
-				for _, crt := range hostCAs[host] {
-					hostCASubjects[host] = append(hostCASubjects[host], crt.Subject.String())
-				}
+		if len(x509Pat) == 0 {
+			if authHandler != nil && authHandler.HaveCertAuth {
+				x509Pat.Set("*=any")
+			} else {
+				x509Pat.Set("*=none")
 			}
-			logf(nil, logLevelInfo, "X509 auth: %v", hostCASubjects)
+		}
+
+		if len(x509Pat) == 1 && x509Pat[0].SType == SNIPatternAny {
+			tlsConfig.ClientAuth = x509Pat[0].ClientAuth
+		} else {
+			tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+				pat := x509Pat.FindPat(chi)
+				logf(nil, logLevelInfo, "x509 auth for %s: %v", chi.ServerName, pat)
+				if pat.ClientAuth == tls.NoClientCert {
+					return nil, nil
+				}
+				newConf := tlsConfig.Clone()
+				newConf.ClientAuth = pat.ClientAuth
+				return newConf, nil
+			}
 		}
 		ln = tls.NewListener(ln, tlsConfig)
 		logf(nil, logLevelInfo, "SSL enabled, cert=%s", *certFile)
