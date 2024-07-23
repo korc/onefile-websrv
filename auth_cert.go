@@ -56,6 +56,9 @@ func NewAuthX509Pat(sni, action string) (ret AuthX509Pattern, err error) {
 	if strings.HasPrefix(action, "!") {
 		ret.require = true
 		action = action[1:]
+	} else if strings.HasPrefix(action, "require:") {
+		ret.require = true
+		action = action[len("require:"):]
 	}
 	switch action {
 	case "none":
