@@ -55,7 +55,7 @@ func main() {
 	var x509Pat AuthX509PatFlag
 	flag.Var(&authFlag, "auth", "alias to 'role'")
 	flag.Var(&authFlag, "role", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
-	flag.Var(&x509Pat, "x509-pat", "{'*'|'*.'<domain>|<servername>}={'none'|['require:']'any'} (multi-arg, default '*=any' if have cert auth or '*=none' otherwise)")
+	flag.Var(&x509Pat, "x509-pat", "{'*'|'*.'<domain>|<servername>}={'none'|['require:']'any'|['require:']'file:'<ca.pem>} (multi-arg, default '*=any' if have cert auth or '*=none' otherwise)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
@@ -251,6 +251,7 @@ func main() {
 
 		if len(x509Pat) == 1 && x509Pat[0].SType == SNIPatternAny {
 			tlsConfig.ClientAuth = x509Pat[0].ClientAuth
+			tlsConfig.ClientCAs = x509Pat[0].ClientCAs
 		} else {
 			tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
 				pat := x509Pat.FindPat(chi)
@@ -260,6 +261,7 @@ func main() {
 				}
 				newConf := tlsConfig.Clone()
 				newConf.ClientAuth = pat.ClientAuth
+				newConf.ClientCAs = pat.ClientCAs
 				return newConf, nil
 			}
 		}

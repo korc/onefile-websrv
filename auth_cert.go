@@ -2,8 +2,10 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"crypto/x509/pkix"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -20,6 +22,7 @@ const (
 type AuthX509Pattern struct {
 	SType      SNIPatternType
 	ClientAuth tls.ClientAuthType
+	ClientCAs  *x509.CertPool
 	sni        string
 	require    bool
 	action     string
@@ -68,7 +71,24 @@ func NewAuthX509Pat(sni, action string) (ret AuthX509Pattern, err error) {
 			ret.ClientAuth = tls.RequireAnyClientCert
 		}
 	default:
-		err = fmt.Errorf("action have to be 'any' or 'none', not %#v", action)
+		if strings.HasPrefix(action, "file:") {
+			ret.ClientCAs = x509.NewCertPool()
+			var pemData []byte
+			pemData, err = os.ReadFile(action[len("file:"):])
+			if err != nil {
+				return
+			}
+			if !ret.ClientCAs.AppendCertsFromPEM(pemData) {
+				err = fmt.Errorf("could not add certs from %#v", action)
+				return
+			}
+			ret.ClientAuth = tls.VerifyClientCertIfGiven
+			if ret.require {
+				ret.ClientAuth = tls.RequireAndVerifyClientCert
+			}
+		} else {
+			err = fmt.Errorf("action have to be 'file:<file.pem>', 'any' or 'none', not %#v", action)
+		}
 	}
 	ret.action = action
 	return
