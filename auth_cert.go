@@ -1,15 +1,19 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"fmt"
+	"math/big"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 )
-
-type X509DNList []pkix.AttributeTypeAndValue
 
 type SNIPatternType int
 
@@ -28,69 +32,150 @@ type AuthX509Pattern struct {
 	action     string
 }
 
-func (l X509DNList) String() string {
-	ret := []string{}
-	for _, dn := range l {
-		oid := ""
-		for _, i := range dn.Type {
-			if oid != "" {
-				oid += "."
-			}
-			oid += fmt.Sprintf("%d", i)
-		}
-		if oidName, ok := oidMap[oid]; ok {
-			oid = oidName
-		}
-		ret = append(ret, fmt.Sprintf("%s=%s", oid, dn.Value))
-	}
-	return strings.Join(ret, ",")
+var knownOIDs = map[string]asn1.ObjectIdentifier{
+	"DOMAINCOMPONENT":     {0, 9, 2342, 19200300, 100, 1, 25},
+	"DC":                  {0, 9, 2342, 19200300, 100, 1, 25},
+	"EMAIL":               {1, 2, 840, 113549, 1, 9, 1},
+	"UNSTRUCTUREDNAME":    {1, 2, 840, 113549, 1, 9, 2},
+	"UNSTRUCTUREDADDRESS": {1, 2, 840, 113549, 1, 9, 8},
+	"POSTALCODE":          {2, 5, 4, 1},
+	"CN":                  {2, 5, 4, 3},
+	"SN":                  {2, 5, 4, 4},
+	"SURNAME":             {2, 5, 4, 4},
+	"COMMONNAME":          {2, 5, 4, 3},
+	"SERIALNUMBER":        {2, 5, 4, 5},
+	"DEVICESERIALNUMBER":  {2, 5, 4, 5},
+	"C":                   {2, 5, 4, 6},
+	"L":                   {2, 5, 4, 7},
+	"ST":                  {2, 5, 4, 8},
+	"STREETADDRESS":       {2, 5, 4, 9},
+	"O":                   {2, 5, 4, 10},
+	"OU":                  {2, 5, 4, 11},
+	"TITLE":               {2, 5, 4, 12},
+	"GN":                  {2, 5, 4, 42},
+	"GIVENNAME":           {2, 5, 4, 42},
+	"INITIALS":            {2, 5, 4, 43},
 }
 
-func NewAuthX509Pat(sni, action string) (ret AuthX509Pattern, err error) {
-	if sni == "*" {
-		ret.SType = SNIPatternAny
-	} else if strings.HasPrefix(sni, "*.") {
-		ret.SType = SNIPatternDomain
-		sni = sni[1:]
-	} else {
-		ret.SType = SNIPatternExact
+func StringToOID(typeName string) (asn1.ObjectIdentifier, error) {
+	if t, have := knownOIDs[strings.ToUpper(typeName)]; have {
+		return t, nil
 	}
-	ret.sni = sni
-	if strings.HasPrefix(action, "!") {
-		ret.require = true
-		action = action[1:]
-	} else if strings.HasPrefix(action, "require:") {
-		ret.require = true
+	var asn1Type asn1.ObjectIdentifier
+	for _, z := range strings.Split(typeName, ".") {
+		if i, err := strconv.Atoi(z); err != nil {
+			knownOIDNames := []string{}
+			for v := range knownOIDs {
+				knownOIDNames = append(knownOIDNames, v)
+			}
+			return nil, fmt.Errorf("cannot convert %#v to int: %s. supported OID names: %v", z, err, knownOIDNames)
+		} else {
+			asn1Type = append(asn1Type, i)
+		}
+	}
+	return asn1Type, nil
+}
+
+func createCertFromDNs(dnList []string) (cert *x509.Certificate, err error) {
+	subject := pkix.Name{}
+
+	for _, n := range dnList {
+		typeAndValue := strings.SplitN(n, "=", 2)
+		if len(typeAndValue) != 2 {
+			err = fmt.Errorf("no '=' in %#v", n)
+			return
+		}
+		asn1Type, err := StringToOID(typeAndValue[0])
+		if err != nil {
+			return nil, err
+		}
+		name := pkix.AttributeTypeAndValue{Type: asn1Type, Value: typeAndValue[1]}
+		if reflect.DeepEqual(asn1Type, knownOIDs["DC"]) || reflect.DeepEqual(asn1Type, knownOIDs["EMAIL"]) {
+			name.Value = asn1.RawValue{Tag: asn1.TagIA5String, Bytes: []byte(name.Value.(string))}
+		}
+		subject.ExtraNames = append(subject.ExtraNames, name)
+	}
+
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	tmpl := &x509.Certificate{Subject: subject}
+	tmpl.SerialNumber, _ = rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+
+	var crtBytes []byte
+	crtBytes, err = x509.CreateCertificate(rand.Reader, tmpl, tmpl, pubKey, privKey)
+	if err != nil {
+		return
+	}
+	cert, err = x509.ParseCertificate(crtBytes)
+	return
+}
+
+func (pat *AuthX509Pattern) SetAction(action string) (err error) {
+	if strings.HasPrefix(action, "require:") {
+		pat.require = true
 		action = action[len("require:"):]
 	}
 	switch action {
 	case "none":
 	case "any":
-		ret.ClientAuth = tls.RequestClientCert
-		if ret.require {
-			ret.ClientAuth = tls.RequireAnyClientCert
+		pat.ClientAuth = tls.RequestClientCert
+		if pat.require {
+			pat.ClientAuth = tls.RequireAnyClientCert
 		}
 	default:
 		if strings.HasPrefix(action, "file:") {
-			ret.ClientCAs = x509.NewCertPool()
+			if pat.ClientCAs == nil {
+				pat.ClientCAs = x509.NewCertPool()
+			}
 			var pemData []byte
 			pemData, err = os.ReadFile(action[len("file:"):])
 			if err != nil {
 				return
 			}
-			if !ret.ClientCAs.AppendCertsFromPEM(pemData) {
+			if !pat.ClientCAs.AppendCertsFromPEM(pemData) {
 				err = fmt.Errorf("could not add certs from %#v", action)
 				return
 			}
-			ret.ClientAuth = tls.VerifyClientCertIfGiven
-			if ret.require {
-				ret.ClientAuth = tls.RequireAndVerifyClientCert
+			pat.ClientAuth = tls.VerifyClientCertIfGiven
+			if pat.require {
+				pat.ClientAuth = tls.RequireAndVerifyClientCert
+			}
+		} else if strings.HasPrefix(action, "dn:") {
+			var crt *x509.Certificate
+			crt, err = createCertFromDNs(strings.Split(action[len("dn:"):], "/"))
+			if err != nil {
+				return
+			}
+			if pat.ClientCAs == nil {
+				pat.ClientCAs = x509.NewCertPool()
+			}
+			pat.ClientCAs.AddCert(crt)
+			pat.ClientAuth = tls.RequestClientCert
+			if pat.require {
+				pat.ClientAuth = tls.RequireAnyClientCert
 			}
 		} else {
-			err = fmt.Errorf("action have to be 'file:<file.pem>', 'any' or 'none', not %#v", action)
+			return fmt.Errorf("action have to be 'file:<file.pem>', dn:AA=BB/CC=DD/1.2.3=XXX/..., 'any' or 'none', not %#v", action)
 		}
 	}
-	ret.action = action
+	pat.action = action
+	return nil
+}
+
+func NewAuthX509Pat(sni string) (pat *AuthX509Pattern, err error) {
+	pat = &AuthX509Pattern{}
+	if sni == "*" {
+		pat.SType = SNIPatternAny
+	} else if strings.HasPrefix(sni, "*.") {
+		pat.SType = SNIPatternDomain
+		sni = sni[1:]
+	} else {
+		pat.SType = SNIPatternExact
+	}
+	pat.sni = sni
 	return
 }
 
@@ -104,7 +189,7 @@ func (ap AuthX509Pattern) String() (ret string) {
 		ret = ap.sni + "="
 	}
 	if ap.require {
-		ret += "!"
+		ret += "require:"
 	}
 	ret += ap.action
 	return
@@ -120,19 +205,35 @@ func (ap AuthX509Pattern) Matches(sni string) bool {
 	return strings.EqualFold(ap.sni, sni)
 }
 
-type AuthX509PatFlag []AuthX509Pattern
+type AuthX509PatFlag []*AuthX509Pattern
 
 // Set implements flag.Value.
-func (a *AuthX509PatFlag) Set(s string) error {
+func (authFlag *AuthX509PatFlag) Set(s string) (err error) {
 	nameAndValue := strings.SplitN(s, "=", 2)
 	if len(nameAndValue) != 2 {
 		return fmt.Errorf("auth string %#v does not contain '=' ", s)
 	}
-	pat, err := NewAuthX509Pat(nameAndValue[0], nameAndValue[1])
-	if err != nil {
+	var pat *AuthX509Pattern
+	var foundExisting bool
+	for _, testPat := range *authFlag {
+		if testPat.sni == nameAndValue[0] {
+			pat = testPat
+			foundExisting = true
+			break
+		}
+	}
+	if !foundExisting {
+		pat, err = NewAuthX509Pat(nameAndValue[0])
+		if err != nil {
+			return err
+		}
+	}
+	if err := pat.SetAction(nameAndValue[1]); err != nil {
 		return err
 	}
-	*a = append(*a, pat)
+	if !foundExisting {
+		*authFlag = append(*authFlag, pat)
+	}
 
 	return nil
 }
@@ -149,7 +250,7 @@ func (a AuthX509PatFlag) String() string {
 func (a AuthX509PatFlag) FindPat(chi *tls.ClientHelloInfo) AuthX509Pattern {
 	for _, p := range a {
 		if p.Matches(strings.ToLower(chi.ServerName)) {
-			return p
+			return *p
 		}
 	}
 	return AuthX509Pattern{}
