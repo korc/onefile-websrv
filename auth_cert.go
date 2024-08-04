@@ -114,9 +114,10 @@ func createCertFromDNs(dnList []string) (cert *x509.Certificate, err error) {
 }
 
 func (pat *AuthX509Pattern) SetAction(action string) (err error) {
-	if strings.HasPrefix(action, "require:") {
+	var actOpts options
+	actOpts, action = parseCurlyParams(action)
+	if actOpts.IsTrue("require", false) {
 		pat.require = true
-		action = action[len("require:"):]
 	}
 	switch action {
 	case "none":
@@ -189,7 +190,7 @@ func (ap AuthX509Pattern) String() (ret string) {
 		ret = ap.sni + "="
 	}
 	if ap.require {
-		ret += "require:"
+		ret += "{require=1}"
 	}
 	ret += ap.action
 	return

@@ -55,7 +55,7 @@ func main() {
 	var x509Pat AuthX509PatFlag
 	flag.Var(&authFlag, "auth", "alias to 'role'")
 	flag.Var(&authFlag, "role", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
-	flag.Var(&x509Pat, "x509-pat", "{'*'|'*.'<sni_domain>|<sni>}=['require:']{'none'|'any'|'file:'<ca.pem>|'dn:A=B/C=D/1.2.3=XXX/...'} (multi-arg, default '*=any' if have cert auth roles and '*=none' otherwise)")
+	flag.Var(&x509Pat, "x509-pat", "{'*'|'*.'<sni_domain>|<sni>}=[<params>]{'none'|'any'|'file:'<ca.pem>|'dn:A=B/C=D/1.2.3=XXX/...'} (multi-arg, default '*=any' if have cert auth roles and '*=none' otherwise)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
