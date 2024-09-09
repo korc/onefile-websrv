@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -213,8 +214,14 @@ func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFr
 	defer onceDone.Do(stopRunning)
 	defer close(dataFromWS)
 	injectRequestNrHeader := wsh.injectRequestNrHeader
+	_, debugWSRead := wsh.connectParams["debug-ws-read"]
 	for keepRunning.Load().(bool) {
 		msgType, data, err := c.ReadMessage()
+		if debugWSRead {
+			logf(r, logLevelInfo, "WS read type=%d len=%d err=%s", msgType, len(data), err)
+			hex.Dumper(os.Stderr).Write(data)
+			os.Stderr.Write([]byte("\n"))
+		}
 		if err != nil {
 			if err == io.EOF {
 				logf(r, logLevelVerbose, "WS EOF")
@@ -246,6 +253,8 @@ func (wsh *webSocketHandler) wsWriter(r *http.Request, c *websocket.Conn, dataFr
 	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
 	defer logf(r, logLevelDebug, "WSWriter finished")
 	defer onceDone.Do(stopRunning)
+	_, debugWSWrite := wsh.connectParams["debug-ws-write"]
+
 loop:
 	for keepRunning.Load().(bool) {
 		select {
@@ -253,6 +262,11 @@ loop:
 			logf(r, logLevelDebug, "data (nil=%#v) from conn", data == nil)
 			if data == nil {
 				break loop
+			}
+			if debugWSWrite {
+				logf(r, logLevelInfo, "WS write type=%d len=%d", wsh.messageType, len(data))
+				hex.Dumper(os.Stderr).Write(data)
+				os.Stderr.Write([]byte("\n"))
 			}
 			if err := c.WriteMessage(wsh.messageType, data); err != nil {
 				logf(r, logLevelError, "Error writing to WS: %s", err)

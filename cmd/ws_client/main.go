@@ -18,6 +18,7 @@ import (
 
 var exitOnBadStatus = false
 var connCount atomic.Uint64
+var writeDataType = websocket.BinaryMessage
 
 const bufSize = 32 * 1024
 
@@ -56,7 +57,7 @@ func connectAndLoop(location string, headers http.Header, dst io.WriteCloser, sr
 				}
 				break
 			}
-			if err := ws.WriteMessage(websocket.BinaryMessage, buf[:nRead]); err != nil {
+			if err := ws.WriteMessage(writeDataType, buf[:nRead]); err != nil {
 				log.Printf("[%d] Error writing WS: %s", connNum, err)
 				break
 			}
@@ -99,6 +100,7 @@ func main() {
 	certKeyFlag := flag.String("key", "", "Key for SSL certificate")
 	listenAddr := flag.String("listen", "", "Listen on address instead of stdin/out")
 	connectAddr := flag.String("connect", "", "Connect to address instead of stdin/out")
+	flag.IntVar(&writeDataType, "type", writeDataType, "WS write data type")
 	exitOnBadStatusFlag := flag.Bool("exit-on-bad-status", false, "exit with 100 on bad status from WS")
 	flag.Parse()
 

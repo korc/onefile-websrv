@@ -52,7 +52,10 @@ func main() {
 	}
 
 	var authFlag, aclFlag, urlMaps, corsMaps, argsFiles, addHeaders ArrayFlag
-	flag.Var(&authFlag, "auth", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
+	var x509Pat AuthX509PatFlag
+	flag.Var(&authFlag, "auth", "alias to 'role'")
+	flag.Var(&authFlag, "role", "[<role>[+<role2>]=]<method>:<auth> (multi-arg)")
+	flag.Var(&x509Pat, "x509-pat", "{'*'|'*.'<sni_domain>|<sni>}=[<params>]{'none'|'any'|'file:'<ca.pem>|'dn:A=B/C=D/1.2.3=XXX/...'} (multi-arg, default '*=any' if have cert auth roles and '*=none' otherwise)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
 	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
@@ -114,7 +117,7 @@ func main() {
 	}
 
 	var defaultHandler http.Handler
-	haveCertAuth := false
+	var authHandler *AuthHandler
 
 	if len(addHeaders) > 0 {
 		defaultHandler = &ModifyHeaderHandler{NextHandler: defaultHandler}
@@ -126,7 +129,8 @@ func main() {
 	}
 
 	if len(authFlag) > 0 {
-		defaultHandler = &AuthHandler{DefaultHandler: defaultHandler}
+		authHandler = &AuthHandler{DefaultHandler: defaultHandler}
+		defaultHandler = authHandler
 		for _, auth := range authFlag {
 			methodIdx := strings.Index(auth, ":")
 			tagIdx := strings.Index(auth, "=")
@@ -137,10 +141,6 @@ func main() {
 				tagIdx = -1
 			}
 			authMethod := auth[tagIdx+1 : methodIdx]
-			switch authMethod {
-			case "Cert", "CertBy", "CertKeyHash":
-				haveCertAuth = true
-			}
 			defaultHandler.(*AuthHandler).AddAuth(authMethod, auth[methodIdx+1:], role)
 		}
 		if len(aclFlag) > 0 {
@@ -241,9 +241,29 @@ func main() {
 		if *tls12Max {
 			tlsConfig.MaxVersion = tls.VersionTLS12
 		}
-		if haveCertAuth {
-			tlsConfig.ClientAuth = tls.RequestClientCert
-			logf(nil, logLevelInfo, "X509 auth enabled")
+		if len(x509Pat) == 0 {
+			if authHandler != nil && authHandler.HaveCertAuth {
+				x509Pat.Set("*=any")
+			} else {
+				x509Pat.Set("*=none")
+			}
+		}
+
+		if len(x509Pat) == 1 && x509Pat[0].SType == SNIPatternAny {
+			tlsConfig.ClientAuth = x509Pat[0].ClientAuth
+			tlsConfig.ClientCAs = x509Pat[0].ClientCAs
+		} else {
+			tlsConfig.GetConfigForClient = func(chi *tls.ClientHelloInfo) (*tls.Config, error) {
+				pat := x509Pat.FindPat(chi)
+				logf(nil, logLevelInfo, "x509 auth for %s: %v", chi.ServerName, pat)
+				if pat.ClientAuth == tls.NoClientCert {
+					return nil, nil
+				}
+				newConf := tlsConfig.Clone()
+				newConf.ClientAuth = pat.ClientAuth
+				newConf.ClientCAs = pat.ClientCAs
+				return newConf, nil
+			}
 		}
 		ln = tls.NewListener(ln, tlsConfig)
 		logf(nil, logLevelInfo, "SSL enabled, cert=%s", *certFile)
