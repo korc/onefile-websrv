@@ -279,6 +279,7 @@ Several options support retrieving a value from request. The syntax is as follow
     - `host:<hostname>` to apply only for particular virtual hosts (req with `Host: hostname`)
     - `GET`, `POST`, etc. to filter by HTTP methods
     - `onfail:<URL>` redirect to URL when auth fails. can use `@param@` placeholders to solve into url-escaped values from request (ex: `@req:host@`)
+      - use `file:` URL to serve file instead of redirection
   - `:` separates alternate roles (OR operation)
   - `+` makes all specified roles to be required (AND operation)
     - can be used to implement multi-factor auth

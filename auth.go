@@ -765,9 +765,14 @@ func (ah *AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		next.ServeHTTP(w, authenticatedRequest)
 	} else if errRedirect, ok := err.(ErrNeedAuthRedirected); ok {
-		w.Header().Set("Location", errRedirect.RedirectTo)
-		w.WriteHeader(http.StatusFound)
-		w.Write([]byte(err.Error()))
+		if strings.HasPrefix(errRedirect.RedirectTo, "file:") {
+			w.Header().Set("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate")
+			http.ServeFile(w, r, errRedirect.RedirectTo[5:])
+		} else {
+			w.Header().Set("Location", errRedirect.RedirectTo)
+			w.WriteHeader(http.StatusFound)
+			w.Write([]byte(err.Error()))
+		}
 	} else {
 		logf(r, logLevelInfo, "auth failed: %s", err)
 		for k := range ah.Auths {
