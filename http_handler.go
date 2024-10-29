@@ -48,7 +48,6 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 	defaultDirector := prxHandler.Director
 	prxHandler.Director = func(request *http.Request) {
 		origPath := request.URL.Path
-		origHost := request.URL.Host
 		origRequest := request.Clone(request.Context())
 		defaultDirector(request)
 		if pathRe != nil {
@@ -59,7 +58,7 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 			}
 			orig := origPath
 			if pathReWithHost {
-				orig = origHost + orig
+				orig = origRequest.Host + orig
 			}
 			matches := pathRe.FindAllStringSubmatchIndex(orig, -1)
 			if matches == nil {
