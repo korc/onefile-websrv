@@ -15,8 +15,8 @@ docker run --rm -it -v "$PWD:/var/www/html:ro" -p 8080:80 korc/onefile-websrv
 _Install [Go](https://golang.org/dl/)_
 
 ```sh
-go get -u github.com/korc/onefile-websrv
-go/bin/onefile-websrv -listen :8080
+go install github.com/korc/onefile-websrv@latest
+~/go/bin/onefile-websrv -listen :8080
 ```
 
 #### Public HTTPS server with valid, auto-generated Let's Encrypt certificates
@@ -24,9 +24,9 @@ go/bin/onefile-websrv -listen :8080
 (replace `example.com` with your real public hostname)
 
 ```sh
-go get -u github.com/korc/onefile-websrv
+go install github.com/korc/onefile-websrv@latest
 mkdir acme-certs
-sudo go/bin/onefile-websrv -listen :443 -acmehost example.com -cert $PWD/acme-certs -map /=file:/var/www
+sudo ~/go/bin/onefile-websrv -listen :443 -acmehost example.com -cert $PWD/acme-certs -map /=file:/var/www
 ```
 
 Check out systemd approach below for more secure setup.
@@ -279,6 +279,7 @@ Several options support retrieving a value from request. The syntax is as follow
     - `host:<hostname>` to apply only for particular virtual hosts (req with `Host: hostname`)
     - `GET`, `POST`, etc. to filter by HTTP methods
     - `onfail:<URL>` redirect to URL when auth fails. can use `@param@` placeholders to solve into url-escaped values from request (ex: `@req:host@`)
+      - use `file:` URL to serve file instead of redirection
   - `:` separates alternate roles (OR operation)
   - `+` makes all specified roles to be required (AND operation)
     - can be used to implement multi-factor auth
