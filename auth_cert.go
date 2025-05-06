@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -21,6 +22,7 @@ const (
 	SNIPatternAny = iota
 	SNIPatternDomain
 	SNIPatternExact
+	SNIPatternRegex
 )
 
 type AuthX509Pattern struct {
@@ -28,6 +30,7 @@ type AuthX509Pattern struct {
 	ClientAuth tls.ClientAuthType
 	ClientCAs  *x509.CertPool
 	sni        string
+	rex        *regexp.Regexp
 	require    bool
 	action     string
 }
@@ -173,6 +176,9 @@ func NewAuthX509Pat(sni string) (pat *AuthX509Pattern, err error) {
 	} else if strings.HasPrefix(sni, "*.") {
 		pat.SType = SNIPatternDomain
 		sni = sni[1:]
+	} else if strings.HasPrefix(sni, "^") {
+		pat.SType = SNIPatternRegex
+		pat.rex = regexp.MustCompile(sni)
 	} else {
 		pat.SType = SNIPatternExact
 	}
@@ -186,6 +192,8 @@ func (ap AuthX509Pattern) String() (ret string) {
 		ret = "*="
 	case SNIPatternDomain:
 		ret = "*" + ap.sni + "="
+	case SNIPatternRegex:
+		ret = "^" + ap.sni + "="
 	default:
 		ret = ap.sni + "="
 	}
@@ -197,11 +205,13 @@ func (ap AuthX509Pattern) String() (ret string) {
 }
 
 func (ap AuthX509Pattern) Matches(sni string) bool {
-	if ap.SType == SNIPatternAny {
+	switch ap.SType {
+	case SNIPatternAny:
 		return true
-	}
-	if ap.SType == SNIPatternDomain {
+	case SNIPatternDomain:
 		return strings.HasSuffix(sni, ap.sni)
+	case SNIPatternRegex:
+		return ap.rex.MatchString(sni)
 	}
 	return strings.EqualFold(ap.sni, sni)
 }
