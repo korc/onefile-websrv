@@ -53,9 +53,16 @@ func (ah *IPRangeAuthenticator) addIPNet(cidr string) error {
 }
 
 func (ah *IPRangeAuthenticator) GetRoles(req *http.Request, _ map[string]interface{}) ([]string, error) {
-	clientIP, _, err := net.SplitHostPort(req.RemoteAddr)
-	if err != nil {
-		return nil, err
+	var clientIP string
+
+	if req.RemoteAddr == "@" { // listening on unix socket
+		clientIP = "0.0.0.0"
+	} else {
+		var err error
+		clientIP, _, err = net.SplitHostPort(req.RemoteAddr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if xff := req.Header.Get("X-Forwarded-For"); xff != "" && len(ah.xff) > 0 {
 		clientIP = ResolveXForwardedFor(append(strings.Split(xff, ", "), clientIP), ah.xff)
