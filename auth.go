@@ -504,7 +504,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 		case "Bearer":
 			ah.checkAuthPassBearer(authValue, r, haveRoles, neededRoles)
 		default:
-			return nil, errors.New("unsupported method")
+			logf(r, logLevelWarning, "unknown auth method %#q, ignoring", authMethod)
 		}
 	}
 
