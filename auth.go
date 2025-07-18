@@ -490,7 +490,7 @@ func (ah *AuthHandler) checkAuthPass(r *http.Request) (*http.Request, error) {
 	if authHdr := r.Header.Get("Authorization"); authHdr != "" {
 		authFields := strings.SplitN(authHdr, " ", 2)
 		if len(authFields) < 2 {
-			return nil, errors.New("bad auth")
+			authFields = append(authFields, "")
 		}
 		authMethod := authFields[0]
 		authValue := authFields[1]
