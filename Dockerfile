@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 RUN apk update && apk add --no-cache git
 
 COPY go.mod go.sum $GOPATH/src/onefile-websrv/
@@ -7,7 +7,7 @@ WORKDIR $GOPATH/src/onefile-websrv/
 RUN go mod download && go mod verify
 
 COPY *.go cmd $GOPATH/src/onefile-websrv/
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=0 \
   go build -a -installsuffix cgo -ldflags="-w -s" -o /go/bin/ ./...
 
 FROM scratch
