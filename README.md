@@ -90,7 +90,7 @@ websrv -h
   -user string
       Switch to user (NOT RECOMMENDED)
   -cors value
-      <path>=<allowed_origin> (multi-arg)
+      [{host_re=<vhost_re>,methods=<method:..>,headers=<hdr:..>,creds=<str>}]<path_re>=<allowed_origin_re> (multi-arg)
   -wstmout int
       Websocket alive check timer in seconds (default 60)
   -reqlog string
