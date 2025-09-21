@@ -58,7 +58,7 @@ func main() {
 	flag.Var(&x509Pat, "x509-pat", "{'*'|'*.'<sni_domain>|<sni>}=[<params>]{'none'|'any'|'file:'<ca.pem>|'dn:A=B/C=D/1.2.3=XXX/...'} (multi-arg, default '*=any' if have cert auth roles and '*=none' otherwise)")
 	flag.Var(&aclFlag, "acl", "[{host:<vhost..>|<method..>}]<path_regexp>=<role>[+<role2..>]:<role..> (multi-arg)")
 	flag.Var(&urlMaps, "map", "[<vhost>]/<path>=<handler>:[<params>] (multi-arg, default '/=file:')")
-	flag.Var(&corsMaps, "cors", "<path>=<allowed_origin> (multi-arg)")
+	flag.Var(&corsMaps, "cors", "[{host_re=<vhost_re>,methods=<method:..>,headers=<hdr:..>,creds=<str>}]<path_re>=<allowed_origin_re> (multi-arg)")
 	flag.Var(&argsFiles, "args-file", "files to read arguments from (multi-arg)")
 	flag.Var(&addHeaders, "add-hdr", "add header ['*']<path_re>=<header_name>:<value_req_p> (multi-arg)")
 
@@ -157,8 +157,10 @@ func main() {
 	if len(corsMaps) > 0 {
 		defaultHandler = &CORSHandler{Handler: defaultHandler}
 		for _, cors := range corsMaps {
+			var opts map[string]string
+			opts, cors = parseCurlyParams(cors)
 			pathIdx := strings.Index(cors, "=")
-			if err := defaultHandler.(*CORSHandler).AddRecord(cors[:pathIdx], cors[pathIdx+1:]); err != nil {
+			if err := defaultHandler.(*CORSHandler).AddRecord(cors[:pathIdx], cors[pathIdx+1:], opts); err != nil {
 				log.Fatalf("Could not add CORS record: %s", err)
 			}
 		}
