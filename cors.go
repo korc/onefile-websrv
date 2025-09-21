@@ -137,26 +137,6 @@ func (ch *CORSHandler) handlePreflight(w http.ResponseWriter, r *http.Request) {
 	next.ServeHTTP(w, r)
 }
 
-type headerModifyingResponseWriter struct {
-	next http.ResponseWriter
-	add  http.Header
-}
-
-// Header implements http.ResponseWriter.
-func (h *headerModifyingResponseWriter) Header() http.Header {
-	return h.next.Header()
-}
-
-// Write implements http.ResponseWriter.
-func (h *headerModifyingResponseWriter) Write([]byte) (int, error) {
-	panic("unimplemented")
-}
-
-// WriteHeader implements http.ResponseWriter.
-func (h *headerModifyingResponseWriter) WriteHeader(statusCode int) {
-	panic("unimplemented")
-}
-
 func (ch *CORSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	next := ch.Handler
 	if next == nil {
