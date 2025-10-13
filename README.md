@@ -114,9 +114,11 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
 
 - `-map` option in `hostname/path=handler:params` format can be used to map different paths to different handlers
   - optional `hostname` can be used for virtual hosting, empty value for all hosts
+  - starting with `@` will be saved for later use (like `.ext` option for file: handlers)
 - additional `-map` entries add more mappings
 - supported `handler` types:
   - `file:` statically serve files from directory specified in `params`, or current working directory if empty
+    - `{..}` options can include `404=/some/other/path` or `404=@saved_handler/`  or `.ext=@saved_handler/`
   - `webdav:` WebDAV handler for directory `params`, or memory-only storage if empty. Options between `{..}` before path:
     - `ctype=<CONTENT_TYPE>` use `CONTENT_TYPE` for file content type (was: `-wdctype`)
     - `unsafe=1` use `webdav.Dir` instead of symlink-checking (more safe) custom FS provider
