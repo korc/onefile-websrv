@@ -293,6 +293,8 @@ func main() {
 		logf(nil, logLevelInfo, "Changed to user %v/%v", uid, gid)
 	}
 
+	savedHandlers := map[string]http.Handler{}
+
 	for _, urlMap := range urlMaps {
 		pathSepIdx := strings.Index(urlMap, "=")
 		if pathSepIdx == -1 {
@@ -302,7 +304,6 @@ func main() {
 		if !strings.Contains(urlPath, "/") {
 			logf(nil, logLevelFatal, "URL path does not contain '/' (format: [<vhost>]/[<subpath>])")
 		}
-		urlPathNoHost := urlPath[strings.Index(urlPath, "/"):]
 		urlHandler := urlMap[pathSepIdx+1:]
 		handlerTypeIdx := strings.Index(urlHandler, ":")
 		if handlerTypeIdx == -1 {
@@ -312,7 +313,37 @@ func main() {
 		logf(nil, logLevelInfo, "Handling %#v as %#v (%#v)", urlPath, urlHandler[:handlerTypeIdx], handlerParams)
 		switch urlHandler[:handlerTypeIdx] {
 		case "file":
-			http.Handle(urlPath, http.StripPrefix(urlPathNoHost, http.FileServer(http.Dir(handlerParams))))
+			opts, path := parseCurlyParams(handlerParams)
+			handler := http.StripPrefix(urlPath[strings.Index(urlPath, "/"):], http.FileServer(http.Dir(path)))
+			for opt, value := range opts {
+				if _, alreadyCast := handler.(*ConditionalHandler); !alreadyCast {
+					handler = NewConditionalHandler(handler)
+				}
+				ch := handler.(*ConditionalHandler)
+				if opt == "404" {
+					ch.OnStatus(404, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if strings.HasPrefix(value, "@") {
+							savedHandlers[value[1:]].ServeHTTP(w, r)
+							return
+						}
+						if r.URL.Path == value {
+							logf(r, logLevelWarning, "cannot redirect 404 to self")
+							w.WriteHeader(http.StatusNotFound)
+							w.Write([]byte("404 path not found\n"))
+							return
+						}
+						r.URL.Path = value
+						http.DefaultServeMux.ServeHTTP(w, r)
+					}))
+				} else if strings.HasPrefix(opt, ".") {
+					if strings.HasPrefix(value, "@") {
+						ch.OnPathRegex(regexp.MustCompile(regexp.QuoteMeta(opt)+"$"), savedHandlers[value[1:]])
+					} else {
+						logf(nil, logLevelFatal, "must be savedHandler starting with '@': %#v", value)
+					}
+				}
+			}
+			http.Handle(urlPath, handler)
 		case "websocket", "ws":
 			http.Handle(urlPath, newWebSocketHandler(handlerParams).setReadTimeout(*wsReadTimeout))
 		default:
@@ -321,7 +352,11 @@ func main() {
 				if err != nil {
 					log.Fatalf("could not create protocol handler for %#v: %s", urlHandler[:handlerTypeIdx], err)
 				}
-				http.Handle(urlPath, handler)
+				if strings.HasPrefix(urlPath, "@") {
+					savedHandlers[urlPath[1:]] = handler
+				} else {
+					http.Handle(urlPath, handler)
+				}
 			} else {
 				keys := []string{}
 				for k := range protocolHandlers {
