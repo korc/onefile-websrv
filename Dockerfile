@@ -17,6 +17,5 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 WORKDIR /var/www/html
 
-VOLUME [ "/var/www" ]
 EXPOSE 80 443
 ENTRYPOINT ["/go/bin/onefile-websrv"]
