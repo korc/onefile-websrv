@@ -213,6 +213,9 @@ Before program name, can specify environment and args with `{` `}`
     - default algorithm is `HS256`
     - `RS*` and `PS*` source must be PEM-encoded RSA private key (PKCS#1)
     - `ES*` source is EC-DSA key
+    - `jwt` source is parsed as JSON-formatted JWK file and algorithm set accordingly to it's contents (currently only `ES*` values supported)
+      - generation example: `jose jwk gen -i '{"alg":"ES256","kid":"key-0001"}' -o privkey.jwk`
+      - extract public keys: `jose jwk pub -i privkey.jwk -s -o pubkeys.jwks`
   - `<key>=<value>`: set `key` in the issued claim to `value`
     - if `key` ends with `_claim`, that is removed
     - if `key` ands with `<claim>_repl`, it must contain sed-like string replacement in `@regex@replacement@` format, which will be applied to the claim `<claim>`
@@ -225,6 +228,7 @@ Before program name, can specify environment and args with `{` `}`
           - `today` to make relation based on start of the day in server localtime
           - `q:` get duration relative to issue time from URL query
     - `exp` is by default set to `ts:+5m`, use `exp=` with empty value to explicitly disable JWT expiration
+    - `kid` can be used to set key id value in header. For setting claim with same name use `_claim` suffix.
 
 ##### Examples:
 

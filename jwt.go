@@ -1,10 +1,15 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"math/big"
 	"net/http"
 	"os"
 	"regexp"
@@ -126,6 +131,9 @@ func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	token := jwt.NewWithClaims(j.method, claims)
+	if kid, hasKid := j.options["kid"]; hasKid {
+		token.Header["kid"] = kid
+	}
 	jwtStr, err := token.SignedString(j.key)
 	if err != nil {
 		logf(req, logLevelError, "Could not sign: %s", err)
@@ -178,7 +186,7 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 			} else {
 				handler.claims[opt] = val
 			}
-		case "b64", "alg":
+		case "b64", "alg", "kid":
 		default:
 			if strings.HasSuffix(opt, "_repl") {
 				parts := strings.Split(val, val[:1])
@@ -212,6 +220,18 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 		signAlgo = "HS256"
 	}
 
+	if signAlgo == "jwk" {
+		var err error
+		var kid string
+		signAlgo, signingSource, kid, err = parseJWK(signingSource)
+		if err != nil {
+			logf(nil, logLevelFatal, "Could not read JWK data from %s", err)
+		}
+		if _, have := options["kid"]; kid != "" && !have {
+			options["kid"] = kid
+		}
+	}
+
 	handler.method = jwt.GetSigningMethod(signAlgo)
 	switch signAlgo {
 	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
@@ -240,6 +260,62 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 		logf(nil, logLevelFatal, "Unknown key type: %#v", signAlgo)
 	}
 	return
+}
+
+func parseJWK(data []byte) (signAlgo string, asnData []byte, kid string, err error) {
+	jwk := map[string]interface{}{}
+
+	err = json.Unmarshal(data, &jwk)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if kidVal, has := jwk["kid"]; has {
+		kid = kidVal.(string)
+	}
+	signAlgo = jwk["alg"].(string)
+	switch signAlgo {
+	case "ES256", "ES384", "ES512":
+		key := ecdsa.PrivateKey{}
+		switch jwk["crv"].(string) {
+		case "P-224":
+			key.Curve = elliptic.P224()
+		case "P-256":
+			key.Curve = elliptic.P256()
+		case "P-384":
+			key.Curve = elliptic.P384()
+		case "P-521":
+			key.Curve = elliptic.P521()
+		default:
+			return "", nil, "", fmt.Errorf("unknown %s curve: %s", signAlgo, jwk["crv"].(string))
+		}
+		var data []byte
+		data, err = base64.RawURLEncoding.DecodeString(jwk["d"].(string))
+		if err != nil {
+			logf(nil, logLevelFatal, "cannot decode 'd': %s", err)
+			return "", nil, "", err
+		}
+		key.D = big.NewInt(0).SetBytes(data)
+
+		data, err = base64.RawURLEncoding.DecodeString(jwk["x"].(string))
+		if err != nil {
+			logf(nil, logLevelFatal, "cannot decode 'x': %s", err)
+			return "", nil, "", err
+		}
+		key.X = big.NewInt(0).SetBytes(data)
+
+		data, err = base64.RawURLEncoding.DecodeString(jwk["y"].(string))
+		if err != nil {
+			logf(nil, logLevelFatal, "cannot decode 'y': %s", err)
+			return "", nil, "", err
+		}
+		key.Y = big.NewInt(0).SetBytes(data)
+
+		asnData, err = x509.MarshalECPrivateKey(&key)
+		asnData = pem.EncodeToMemory(&pem.Block{Bytes: asnData, Type: "EC PRIVATE KEY"})
+		return
+	default:
+		return "", nil, "", fmt.Errorf("unknown signing algorithm: %s", signAlgo)
+	}
 }
 
 func init() {
