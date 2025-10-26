@@ -133,6 +133,7 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
       - `tls-cs` include full tls.ConnectionState in JSON output
   - `cgi:` Run a CGI script specified by `params`.
   - `jwt:` generate JWT token
+  - `oauth-token:` POST-capable handler of retrieving `authorization_token`, saved via `store-for`. For client id check use basic auth.
   - `ws-proxy:` WebSocket proxy service, to be used with `ws_proxy`
 
 #### WebSocket handler
@@ -229,6 +230,7 @@ Before program name, can specify environment and args with `{` `}`
           - `q:` get duration relative to issue time from URL query
     - `exp` is by default set to `ts:+5m`, use `exp=` with empty value to explicitly disable JWT expiration
     - `kid` can be used to set key id value in header. For setting claim with same name use `_claim` suffix.
+    - `store-for` is a request parameter for redirect_uri to store JWT for later retrieval via oauth-token endpoint (loosely) following OAuth 2.0 protocol
 
 ##### Examples:
 

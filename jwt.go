@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -15,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -74,6 +77,15 @@ func parseJWTKeyString(keyString string) (data []byte, err error) {
 	}
 	return
 }
+
+type storedToken struct {
+	storedFor   string
+	storedAt    time.Time
+	accessToken string
+}
+
+var storedTokens = map[string]storedToken{}
+var storedTokensMutex = sync.Mutex{}
 
 func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	claims := make(jwt.MapClaims)
@@ -140,8 +152,104 @@ func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Header().Add("Content-Type", "application/jwt")
-	w.Write([]byte(jwtStr))
+	if j.options["store-for"] != "" {
+		codeBytes := make([]byte, 20)
+		rand.Reader.Read(codeBytes)
+		code := base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").EncodeToString(codeBytes)
+		storeForValue, solved, err := GetRequestParam(j.options["store-for"], req)
+		if !solved {
+			logf(req, logLevelError, "cannot get store-for parameter %#v: %s", j.options["store-for"], err)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("cannot solve store-for"))
+			return
+		}
+		storedTokensMutex.Lock()
+		storedTokens[code] = storedToken{
+			accessToken: jwtStr,
+			storedAt:    time.Now(),
+			storedFor:   storeForValue,
+		}
+		storedTokensMutex.Unlock()
+		w.Header().Add("Content-Type", "application/oauth-code")
+		w.Write([]byte(code))
+	} else {
+		w.Header().Add("Content-Type", "application/jwt")
+		w.Write([]byte(jwtStr))
+	}
+}
+
+func writeOAuthError(w http.ResponseWriter, r *http.Request, errorCode, errorDescription string) {
+	w.Header().Add("Content-Type", "application/json;charset=UTF-8")
+	w.WriteHeader(http.StatusBadRequest)
+	errorData := map[string]interface{}{
+		"error": errorCode,
+	}
+	if errorDescription != "" {
+		errorData["error_description"] = errorDescription
+	}
+	if err := json.NewEncoder(w).Encode(errorData); err != nil {
+		logf(r, logLevelError, "cannot encode error: %s", err)
+	}
+}
+
+func retrieveStoredOAuthCode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		logf(r, logLevelError, "using method %#v instead 'POST'", r.Method)
+		writeOAuthError(w, r, "invalid_request", "wrong method")
+		return
+	}
+
+	if os.Getenv("DEBUG_RETRIEVE_OAUTH") != "" {
+		r.ParseForm()
+		logf(r, logLevelInfo, "POST parameters: %#v", r.PostForm)
+		u, p, ok := r.BasicAuth()
+		logf(r, logLevelInfo, "Basic auth: ok=%#v username=%#v password=%#v", ok, u, p)
+	}
+
+	if grantType := r.PostFormValue("grant_type"); grantType != "authorization_code" {
+		logf(r, logLevelError, "invalid grant type %#v", grantType)
+		if grantType == "" {
+			writeOAuthError(w, r, "invalid_request", "missing grant_type")
+		} else {
+			writeOAuthError(w, r, "unsupported_grant_type", "")
+		}
+		return
+	}
+	code := r.PostFormValue("code")
+	if code == "" {
+		logf(r, logLevelError, "no code")
+		writeOAuthError(w, r, "invalid_request", "no code")
+		return
+	}
+	redirectUri := r.PostFormValue("redirect_uri")
+	if redirectUri == "" {
+		logf(r, logLevelError, "no redirect_uri")
+		writeOAuthError(w, r, "invalid_request", "no redirect_uri")
+		return
+	}
+	storedTokensMutex.Lock()
+	token, have := storedTokens[code]
+	if have {
+		delete(storedTokens, code)
+	}
+	storedTokensMutex.Unlock()
+	if !have {
+		logf(r, logLevelError, "no code %#v in storage", code)
+		writeOAuthError(w, r, "invalid_grant", "no code in storage")
+		return
+	}
+	if redirectUri != token.storedFor {
+		logf(r, logLevelError, "code %#v redirect_uri %#v does not match stored-for %#v", code, redirectUri, token.storedFor)
+		writeOAuthError(w, r, "invalid_grant", "bad redirect_uri")
+		return
+	}
+	w.Header().Add("Content-Type", "application/json;charset=UTF-8")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"access_token": token.accessToken,
+		"token_type":   "bearer",
+	}); err != nil {
+		logf(r, logLevelError, "cannot encode response: %s", err)
+	}
 }
 
 func loadPEMType(pemType string, data []byte) []byte {
@@ -186,7 +294,7 @@ func newJWTHandler(params string) (handler *jwtHandler) {
 			} else {
 				handler.claims[opt] = val
 			}
-		case "b64", "alg", "kid":
+		case "b64", "alg", "kid", "store-for":
 		default:
 			if strings.HasSuffix(opt, "_repl") {
 				parts := strings.Split(val, val[:1])
@@ -322,5 +430,9 @@ func init() {
 	addProtocolHandler("jwt", func(_, s string, sc *serverConfig) (http.Handler, error) {
 		sc.logger.Log(logLevelInfo, "new JWT handler", map[string]interface{}{"parameters": s})
 		return newJWTHandler(s), nil
+	})
+	addProtocolHandler("oauth-token", func(urlPath, params string, cfg *serverConfig) (http.Handler, error) {
+		cfg.logger.Log(logLevelInfo, "new OAuth token retriever", map[string]interface{}{"parameters": params})
+		return http.HandlerFunc(retrieveStoredOAuthCode), nil
 	})
 }
