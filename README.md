@@ -135,6 +135,8 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `jwt:` generate JWT token
   - `oauth-token:` POST-capable handler of retrieving `authorization_token`, saved via `store-for`. For client id check use basic auth.
   - `ws-proxy:` WebSocket proxy service, to be used with `ws_proxy`
+  - `rp:{hdr=val..}reqParam` create content using *Request Parameters* string, optionally setting headers (value also in rp format)
+    - ex: `rp:{Content-Type=str:application/json}tmpl:str:{{printf "%s" (json (map "sub" (rp "jwt:sub:auth:bearer" .req)))}}`
 
 #### WebSocket handler
 
