@@ -99,7 +99,11 @@ func NewHttpHandler(urlPath, params string, cfg *serverConfig) http.Handler {
 			if !strings.HasPrefix(k, "set-hdr:") {
 				continue
 			}
-			request.Header.Set(k[8:], connectParams[k])
+			if k[8:] == "Host" {
+				request.Host = connectParams[k]
+			} else {
+				request.Header.Set(k[8:], connectParams[k])
+			}
 		}
 		noXFF := false
 		if noXFFStr, have := connectParams["no-xff"]; have {
