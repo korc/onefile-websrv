@@ -60,7 +60,7 @@ func GetRequestParam(param string, req *http.Request) (value string, solved bool
 			logf(req, logLevelError, "cannot get X.509 data from non-TLS request")
 			return "", false, ErrCantSolve
 		}
-		if req.TLS.PeerCertificates == nil || len(req.TLS.PeerCertificates) == 0 {
+		if len(req.TLS.PeerCertificates) == 0 {
 			logf(req, logLevelError, "want set claim from X509 %s, but there are no client certificate", param[4:])
 			return "", false, ErrCantSolve
 		}
