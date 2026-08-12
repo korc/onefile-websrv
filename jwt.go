@@ -153,25 +153,7 @@ func (j *jwtHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if j.options["store-for"] != "" {
-		codeBytes := make([]byte, 20)
-		rand.Reader.Read(codeBytes)
-		code := base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").EncodeToString(codeBytes)
-		storeForValue, solved, err := GetRequestParam(j.options["store-for"], req)
-		if !solved {
-			logf(req, logLevelError, "cannot get store-for parameter %#v: %s", j.options["store-for"], err)
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("cannot solve store-for"))
-			return
-		}
-		storedTokensMutex.Lock()
-		storedTokens[code] = storedToken{
-			accessToken: jwtStr,
-			storedAt:    time.Now(),
-			storedFor:   storeForValue,
-		}
-		storedTokensMutex.Unlock()
-		w.Header().Add("Content-Type", "application/oauth-code")
-		w.Write([]byte(code))
+		storeOAuthToken(w, req, j.options["store-for"], jwtStr)
 	} else {
 		w.Header().Add("Content-Type", "application/jwt")
 		w.Write([]byte(jwtStr))
@@ -192,7 +174,35 @@ func writeOAuthError(w http.ResponseWriter, r *http.Request, errorCode, errorDes
 	}
 }
 
+func storeOAuthToken(w http.ResponseWriter, r *http.Request, storeFor, value string) {
+	logf(r, logLevelInfo, "storing token")
+
+	codeBytes := make([]byte, 20)
+	rand.Reader.Read(codeBytes)
+	code := base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").EncodeToString(codeBytes)
+	storeForValue, solved, err := GetRequestParam(storeFor, r)
+	if !solved {
+		logf(r, logLevelError, "cannot get store-for parameter %#v: %s", storeFor, err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("cannot solve store-for"))
+		return
+	}
+	storedTokensMutex.Lock()
+	storedTokens[code] = storedToken{
+		accessToken: value,
+		storedAt:    time.Now(),
+		storedFor:   storeForValue,
+	}
+	storedTokensMutex.Unlock()
+	w.Header().Add("Content-Type", "application/oauth-code")
+	w.Write([]byte(code))
+}
+
 func retrieveStoredOAuthCode(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "PUT" {
+		storeOAuthToken(w, r, "str:"+r.PostFormValue("redirect_uri"), r.PostFormValue("jwt"))
+		return
+	}
 	if r.Method != "POST" {
 		logf(r, logLevelError, "using method %#v instead 'POST'", r.Method)
 		writeOAuthError(w, r, "invalid_request", "wrong method")
@@ -245,8 +255,8 @@ func retrieveStoredOAuthCode(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Add("Content-Type", "application/json;charset=UTF-8")
 	if err := json.NewEncoder(w).Encode(map[string]any{
-		"access_token": token.accessToken,
-		"token_type":   "bearer",
+		"id_token":   token.accessToken,
+		"token_type": "bearer",
 	}); err != nil {
 		logf(r, logLevelError, "cannot encode response: %s", err)
 	}
