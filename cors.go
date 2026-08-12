@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -141,6 +142,10 @@ func (ch *CORSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	next := ch.Handler
 	if next == nil {
 		next = http.DefaultServeMux
+	}
+
+	if os.Getenv("DEBUG_CORS") != "" {
+		logf(r, logLevelInfo, "CORS method=%v host=%v headers=%v", r.Method, r.Host, r.Header)
 	}
 
 	if r.Method == "OPTIONS" &&
