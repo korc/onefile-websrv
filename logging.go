@@ -88,6 +88,12 @@ func (lw *LoggedResponseWriter) Write(buf []byte) (int, error) {
 	return lw.origWriter.Write(buf)
 }
 
+func (lw *LoggedResponseWriter) Flush() {
+	if flusher, ok := lw.origWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // Hijack : call original writer's Hijack
 func (lw *LoggedResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return lw.origWriter.(http.Hijacker).Hijack()
