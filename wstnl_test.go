@@ -15,11 +15,19 @@ import (
 	grlws "github.com/gorilla/websocket"
 )
 
-func TestWSTNLPayloadSizes(t *testing.T) {
-	forwarderPath := filepath.Join("test", "wstnl-forwarder")
-	if _, err := os.Stat(forwarderPath); err != nil {
-		t.Skipf("forwarder binary not found: %v", err)
+func ensureWsTunnel(t *testing.T) string {
+	path := filepath.Join("test", "ws_tunnel")
+	if _, err := os.Stat(path); err == nil {
+		return path
 	}
+	if err := exec.Command("go", "build", "-o", path, "./cmd/ws_tunnel").Run(); err != nil {
+		t.Skipf("ws_tunnel binary not found and could not be built: %v", err)
+	}
+	return path
+}
+
+func TestWSTNLPayloadSizes(t *testing.T) {
+	forwarderPath := ensureWsTunnel(t)
 
 	// Plain TCP echo backend used by the wstnl listener.
 	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
@@ -57,7 +65,7 @@ func TestWSTNLPayloadSizes(t *testing.T) {
 
 	listenPath := "/tunnel"
 	wsURL := "ws://" + srv.Listener.Addr().String() + listenPath
-	cmd := exec.Command(forwarderPath, "-connect", echoAddr, wsURL)
+	cmd := exec.Command(forwarderPath, wsURL, echoAddr)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -136,10 +144,7 @@ func itoa(n int) string {
 }
 
 func TestWSTNLMultiplePools(t *testing.T) {
-	forwarderPath := filepath.Join("test", "wstnl-forwarder")
-	if _, err := os.Stat(forwarderPath); err != nil {
-		t.Skipf("forwarder binary not found: %v", err)
-	}
+	forwarderPath := ensureWsTunnel(t)
 
 	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -181,7 +186,7 @@ func TestWSTNLMultiplePools(t *testing.T) {
 	host := "ws://" + srv.Listener.Addr().String()
 	var cmds []*exec.Cmd
 	for _, p := range paths {
-		cmd := exec.Command(forwarderPath, "-connect", echoAddr, host+p)
+		cmd := exec.Command(forwarderPath, host+p, echoAddr)
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}

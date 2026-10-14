@@ -188,6 +188,17 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
 - Supported options before the pool name in `{...}`:
   - `enc=<encoding>` set the text encoding used for conversion (default `utf-8`)
 
+#### WebSocket Tunneling helper (`ws_tunnel`)
+
+A helper program is available in `cmd/ws_tunnel` to bind a local TCP target to a `wstnl` listener URL:
+
+```sh
+go build ./cmd/ws_tunnel
+./ws_tunnel ws://front-end-srv/sockets/ssh 127.0.0.1:22
+```
+
+It connects to the websocket URL using the `tcp-forwarder` subprotocol and exposes the given target. Multiple `<ws-url> <tcp-host:port>` pairs can be given on one command line.
+
 #### Debug handler
 
 Includes client certificate hash, which can be used for `-auth` option's `Cert` method
