@@ -2,7 +2,7 @@ name: Build with goreleaser
 
 on:
   push:
-    branches: [ master, devel ]
+    branches: [ master ]
     tags:
       - "*"
   pull_request:

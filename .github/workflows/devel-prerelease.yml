@@ -1,0 +1,127 @@
+name: Devel pre-release
+
+on:
+  push:
+    branches:
+      - devel
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build archive
+        id: build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          ext=""
+          if [[ "$GOOS" == "windows" ]]; then ext=".exe"; fi
+          stage="stage"
+          rm -rf "$stage"
+          mkdir -p "$stage"
+          CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+            go build -trimpath -ldflags="-s -w" -o "$stage/onefile-websrv$ext" .
+          for d in cmd/*; do
+            name="$(basename "$d")"
+            if [[ "$name" == "log2pg" ]]; then
+              continue
+            fi
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath -ldflags="-s -w" -o "$stage/${name}${ext}" "./$d"
+          done
+          if [[ "$GOOS" == "windows" ]]; then
+            archive="onefile-websrv-devel-${GOOS}-${GOARCH}.zip"
+            (cd "$stage" && zip -q -r "../${archive}" .)
+          else
+            archive="onefile-websrv-devel-${GOOS}-${GOARCH}.tar.gz"
+            tar -C "$stage" -czf "$archive" .
+          fi
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: onefile-websrv-devel-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ steps.build.outputs.archive }}
+
+  release:
+    name: Publish pre-release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect archives and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          ls -lh
+
+      - name: Determine tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+          date_part="$(date -u +%Y%m%d)"
+          tag="devel-${date_part}-${short_sha}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=Devel pre-release ${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          prerelease: true
+          body: |
+            Automated pre-release from the `devel` branch.
+
+            Commit: ${{ github.sha }}
+          files: |
+            release/*
