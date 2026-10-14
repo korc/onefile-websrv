@@ -134,7 +134,6 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `cgi:` Run a CGI script specified by `params`.
   - `jwt:` generate JWT token
   - `oauth-token:` POST-capable handler of retrieving `authorization_token`, saved via `store-for`. For client id check use basic auth.
-  - `ws-proxy:` WebSocket proxy service, to be used with `ws_proxy`
   - `wstnl:` WebSocket tunneling service (cf. "WebSocket Tunneling" below)
     - handler `params` designate a pool name; multiple listeners/clients can share a pool while binding different URL paths under the mapped prefix
   - `rp:{hdr=val..}reqParam` create content using *Request Parameters* string, optionally setting headers (value also in rp format)
@@ -157,8 +156,7 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
 
 #### HTTP handler
 
-- `params` must be complete URL starting with `http:`, `https:`, `unix:` or `wsprx:`
-  - `wsprx` is handled by `ws-proxy:` mapped server, hostname component as name of it (example below)
+- `params` must be complete URL starting with `http:`, `https:` or `unix:`
 - supports unix sockets in the format of `unix:///path/to/unix-socket:/urlpath`
 - comma-separated options between `{...}` before URL:
   - `cert` and `key` options to set TLS backend client certificate and key files
@@ -174,26 +172,6 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `verify=0` to allow making insecure HTTPS requests
   - `fix-ws-hdr=1` make sure `Sec-Websocket-*` headers are sent as `Sec-WebSocket-*`
   - `ca=<filename>` to set remote RootCAs PEM file
-
-#### Example: Using HTTP handler with `wsprx` schema
-
-Goal: passing backend http server to external front-end. External server possibly publicly accessible, backend possibly in the internal network (a'la ngrok).
-
-- front-end web service:
-  `onefile-websrv -map /=http:wsprx://backend -map /.srv=ws-proxy:{listener=1}backend`
-- back-end web service:
-  `onefile-websrv -map /=file:/data/web/html -listen 127.0.0.1:8000`
-- back-end to front-end connector (from `cmd/ws_proxy`):
-  `ws_proxy -ws ws://front-end-srv/.srv -connect 127.0.0.1:8000`
-
-NOTE: If front-end is accessible from public internet, you should additionally protect `/.srv` endpoint properly with `-acl` options.
-
-#### WebSocket Proxy handler
-
-- `params` is a internal name for this proxy. options:
-  - `{listener=1}` make this a server socket for `ws_proxy` endpoint
-  - `{re=...}` searches URL.Path, and `params` as template for name
-    - ex: `-map /prx/=ws-proxy:{re=^/prx/(.+)}prx-$1`
 
 #### WebSocket Tunneling
 
