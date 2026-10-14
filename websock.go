@@ -108,6 +108,12 @@ func newExecConn(name string, arg ...string) (conn *execConn, err error) {
 
 func (e *execConn) Close() error {
 	e.stdin.Close()
+	if e.stdout != nil {
+		e.stdout.Close()
+	}
+	if e.stderr != nil {
+		e.stderr.Close()
+	}
 	return e.cmd.Wait()
 }
 

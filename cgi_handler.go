@@ -22,6 +22,7 @@ func (h *UnChunkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer os.Remove(tempFile.Name())
+		defer tempFile.Close()
 		n, err := io.Copy(tempFile, r.Body)
 		if err != nil {
 			logf(r, logLevelError, "cannot copy cgi input to temp file: %s", err)

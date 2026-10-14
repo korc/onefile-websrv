@@ -681,7 +681,6 @@ func (ah *AuthHandler) checkAuthPassJWTFilePat(jwtString, fpath string, r *http.
 	for _, testPath := range testList {
 		logf(r, logLevelDebug, "Testing JWT auth file at %#v", testPath)
 		if file, err := os.Open(testPath); err == nil {
-			defer file.Close()
 			tkn, err := jwt.Parse(jwtString, func(token *jwt.Token) (i interface{}, e error) {
 				linescanner := bufio.NewScanner(file)
 				for linescanner.Scan() {
@@ -713,6 +712,7 @@ func (ah *AuthHandler) checkAuthPassJWTFilePat(jwtString, fpath string, r *http.
 				}
 				return
 			})
+			file.Close()
 			if err != nil {
 				logf(r, logLevelWarning, "Could not parse auth token: %s", err)
 				break

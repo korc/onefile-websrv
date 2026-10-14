@@ -6,10 +6,31 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
 type UnixRoundTripper struct {
+}
+
+var unixTransportCache sync.Map
+
+func unixTransport(unixPath string) *http.Transport {
+	if v, ok := unixTransportCache.Load(unixPath); ok {
+		return v.(*http.Transport)
+	}
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: 30 * time.Second}
+			return dialer.DialContext(ctx, "unix", unixPath)
+		},
+		IdleConnTimeout: 10 * time.Minute,
+	}
+	actual, loaded := unixTransportCache.LoadOrStore(unixPath, tr)
+	if loaded {
+		tr.CloseIdleConnections()
+	}
+	return actual.(*http.Transport)
 }
 
 func (u UnixRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -26,12 +47,7 @@ func (u UnixRoundTripper) RoundTrip(request *http.Request) (*http.Response, erro
 	if request.URL.Host == "" {
 		request.URL.Host = "localhost"
 	}
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	return (&http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", unixPath)
-		},
-	}).RoundTrip(request)
+	return unixTransport(unixPath).RoundTrip(request)
 }
 
 func init() {
