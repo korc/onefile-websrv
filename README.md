@@ -135,6 +135,8 @@ Options marked with `multi-arg` can be specified multiple times on command-line,
   - `jwt:` generate JWT token
   - `oauth-token:` POST-capable handler of retrieving `authorization_token`, saved via `store-for`. For client id check use basic auth.
   - `ws-proxy:` WebSocket proxy service, to be used with `ws_proxy`
+  - `wstnl:` WebSocket tunneling service (cf. "WebSocket Tunneling" below)
+    - handler `params` designate a pool name; multiple listeners/clients can share a pool while binding different URL paths under the mapped prefix
   - `rp:{hdr=val..}reqParam` create content using *Request Parameters* string, optionally setting headers (value also in rp format)
     - ex: `rp:{Content-Type=str:application/json}tmpl:str:{{printf "%s" (json (map "sub" (rp "jwt:sub:auth:bearer" .req)))}}`
 
@@ -192,6 +194,21 @@ NOTE: If front-end is accessible from public internet, you should additionally p
   - `{listener=1}` make this a server socket for `ws_proxy` endpoint
   - `{re=...}` searches URL.Path, and `params` as template for name
     - ex: `-map /prx/=ws-proxy:{re=^/prx/(.+)}prx-$1`
+
+#### WebSocket Tunneling
+
+- `params` is a pool name. A map such as `-map /sockets/=wstnl:sockpool01` supports listeners on different paths, for example `/sockets/ssh` and `/sockets/web`.
+- A websocket using the `tcp-forwarder` subprotocol binds the requested URL path as a listener:
+  - only one listener can be bound to one path
+  - text control messages include `OPEN`, `CLOSE`, `CONNECTED`, `CLOSED` and `FAILED`
+  - binary messages carry TCP data prefixed by the 4-byte (network order) session id
+- An ordinary websocket connection (for example from `ws_client`) is routed to the listener bound on the same URL path:
+  - returns `404` if no listener is bound on that path
+  - the server asks the listener to open a session with `OPEN <id>`
+  - returns `503` if the listener fails to open the session
+- After a session is opened, binary data is exchanged between websocket client and listener. Client text messages are converted to binary before forwarding to the listener; listener data is converted back to text if the client's last message was text.
+- Supported options before the pool name in `{...}`:
+  - `enc=<encoding>` set the text encoding used for conversion (default `utf-8`)
 
 #### Debug handler
 
