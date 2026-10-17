@@ -34,6 +34,7 @@ type wstnlSession struct {
 	outbound       [][]byte
 	closeOnce      sync.Once
 	done           chan struct{}
+	closedCh       chan struct{}
 	opened         bool
 	closed         bool
 	lastClientText atomic.Bool
@@ -150,18 +151,29 @@ func (s *wstnlSession) closeWS() {
 	s.closeOnce.Do(func() {
 		log.Printf("wstnl client disconnected: pool=%s session=%d packets_in=%d bytes_in=%d packets_out=%d bytes_out=%d",
 			s.pool.name, s.id, s.packetsIn.Load(), s.bytesIn.Load(), s.packetsOut.Load(), s.bytesOut.Load())
+		// Signal any senders blocked on writeCh to stop first, then take the
+		// lock. This avoids deadlocking against a sender that is blocked on a
+		// full writeCh while holding writeMu.
+		close(s.closedCh)
 		s.writeMu.Lock()
 		ch := s.writeCh
 		s.writeCh = nil
+		ws := s.ws
+		s.ws = nil
+		writerDone := s.writerDone
 		s.writeMu.Unlock()
+		// Close the websocket before waiting for the writer: if the writer is
+		// blocked in WriteMessage (e.g. the client connected but is not
+		// reading), closing the connection unblocks it. Doing it the other way
+		// around deadlocks.
+		if ws != nil {
+			ws.Close()
+		}
 		if ch != nil {
 			close(ch)
 		}
-		if s.writerDone != nil {
-			<-s.writerDone
-		}
-		if s.ws != nil {
-			s.ws.Close()
+		if writerDone != nil {
+			<-writerDone
 		}
 		close(s.done)
 	})
@@ -169,6 +181,15 @@ func (s *wstnlSession) closeWS() {
 
 func (s *wstnlSession) setWS(ws *websocket.Conn) {
 	s.writeMu.Lock()
+	select {
+	case <-s.closedCh:
+		// The session was already closed (e.g. the listener went away) before
+		// the client upgraded; do not start a writer that nobody will stop.
+		s.writeMu.Unlock()
+		ws.Close()
+		return
+	default:
+	}
 	s.ws = ws
 	s.writeCh = make(chan clientOutbound, 1024)
 	s.writerDone = make(chan struct{})
@@ -192,6 +213,11 @@ func (s *wstnlSession) enqueueOutbound(data []byte) {
 	cp := append([]byte(nil), data...)
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	select {
+	case <-s.closedCh:
+		return
+	default:
+	}
 	if s.ws == nil || s.writeCh == nil {
 		s.outbound = append(s.outbound, cp)
 		return
@@ -209,8 +235,16 @@ func (s *wstnlSession) queuePayloadLocked(payload []byte) {
 		}
 	}
 	const chunkSize = 16 * 1024
+	send := func(out clientOutbound) bool {
+		select {
+		case s.writeCh <- out:
+			return true
+		case <-s.closedCh:
+			return false
+		}
+	}
 	if len(data) == 0 {
-		s.writeCh <- clientOutbound{msgType: msgType, data: data}
+		send(clientOutbound{msgType: msgType, data: data})
 		return
 	}
 	for off := 0; off < len(data); off += chunkSize {
@@ -219,7 +253,9 @@ func (s *wstnlSession) queuePayloadLocked(payload []byte) {
 			end = len(data)
 		}
 		chunk := append([]byte(nil), data[off:end]...)
-		s.writeCh <- clientOutbound{msgType: msgType, data: chunk}
+		if !send(clientOutbound{msgType: msgType, data: chunk}) {
+			return
+		}
 	}
 }
 
@@ -493,6 +529,7 @@ func (h *wstnlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pool:     pool,
 		encoding: h.encoding,
 		done:     make(chan struct{}),
+		closedCh: make(chan struct{}),
 	}
 	pool.lock.Lock()
 	pool.sessions[id] = session

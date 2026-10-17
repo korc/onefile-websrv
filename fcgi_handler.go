@@ -45,6 +45,9 @@ func (fh *FastCGIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Error connecting to backend"))
 		return
 	}
+	// Ensure the backend connection is released even if the request fails
+	// before we get a response body to close.
+	defer fcgiClient.Close()
 	params := make(map[string]string)
 	params["QUERY_STRING"] = r.URL.RawQuery
 	params["REQUEST_METHOD"] = r.Method

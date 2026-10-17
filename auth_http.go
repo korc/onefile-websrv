@@ -71,11 +71,16 @@ func (ha *HTTPAuthenticator) GetRoles(req *http.Request, rolesToCheck map[string
 		logf(req, logLevelError, "could not make auth request %s %s: %s", ha.method, url, err)
 		return nil, errors.New("cannot check auth")
 	}
+	// Always close the body: otherwise the keep-alive connection (and its fd)
+	// is leaked on every authenticated request.
+	defer resp.Body.Close()
 	if resp.StatusCode != ha.successCode {
 		respBody, _ := io.ReadAll(resp.Body)
 		logf(req, logLevelWarning, "auth %s to %s failed with %s: %#q", ha.method, url, resp.Status, string(respBody))
 		return nil, nil
 	}
+	// Drain the body so the connection can be reused by the transport.
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return ha.roles, nil
 }
 

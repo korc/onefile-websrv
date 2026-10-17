@@ -1,11 +1,10 @@
 package main
 
-// Reproducer tests for the long-running resource issues found in review.
+// Regression tests for the long-running resource issues found in review.
 //
-// These tests assert the *desired* behaviour (bodies closed, backend
-// connections closed, no goroutines stuck, sessions torn down). They are
-// expected to FAIL against the current code and to pass once the
-// corresponding leak/deadlock is fixed.
+// Each test asserts the fixed behaviour (bodies closed, backend connections
+// closed, no goroutines stuck, sessions torn down). They fail against the
+// buggy code and pass once the corresponding leak/deadlock is fixed.
 //
 // Run just these with:
 //
@@ -155,16 +154,19 @@ func TestFastCGIErrorPathClosesBackend(t *testing.T) {
 	}
 	defer backend.Close()
 
-	// If the handler closed the FCGIClient we see EOF promptly; if it leaked,
-	// the connection is still open and the read times out.
+	// If the handler closed the FCGIClient we see EOF once the request bytes
+	// it sent are drained; if it leaked, the connection stays open and the
+	// read eventually times out.
 	_ = backend.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := backend.Read(make([]byte, 1)); err != nil {
-		if ne, ok := err.(net.Error); ok && ne.Timeout() {
-			t.Fatalf("FastCGI backend connection was left open after a failed request: leaked socket/fd")
+	buf := make([]byte, 4096)
+	for {
+		if _, err := backend.Read(buf); err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				t.Fatalf("FastCGI backend connection was left open after a failed request: leaked socket/fd")
+			}
+			return // EOF / closed: expected
 		}
-		return // EOF / closed: expected
 	}
-	t.Fatalf("FastCGI backend connection is still open after a failed request")
 }
 
 // ---------------------------------------------------------------------------
@@ -271,23 +273,6 @@ func TestWebSocketReaderGoroutineLeak(t *testing.T) {
 //    ws.WriteMessage (client connected but not reading).
 // ---------------------------------------------------------------------------
 
-// smallReadBufferDialer makes the client side of the tunnel accept only a
-// small amount of data, so the server's per-session writer blocks quickly.
-func smallReadBufferDialer() *grlws.Dialer {
-	return &grlws.Dialer{
-		NetDial: func(network, addr string) (net.Conn, error) {
-			c, err := net.Dial(network, addr)
-			if err != nil {
-				return nil, err
-			}
-			if tc, ok := c.(*net.TCPConn); ok {
-				_ = tc.SetReadBuffer(4096)
-			}
-			return c, nil
-		},
-	}
-}
-
 // TestWSTNLListenerGoneClosesSessions triggers the wstnl teardown deadlock:
 // a session writer is blocked writing to a client that does not read, then
 // the listener goes away and the server must still close the client.
@@ -309,7 +294,7 @@ func TestWSTNLListenerGoneClosesSessions(t *testing.T) {
 	clientCh := make(chan *grlws.Conn, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		c, _, err := smallReadBufferDialer().Dial(wsURL, nil)
+		c, _, err := grlws.DefaultDialer.Dial(wsURL, nil)
 		if err != nil {
 			errCh <- err
 			return
@@ -348,13 +333,13 @@ func TestWSTNLListenerGoneClosesSessions(t *testing.T) {
 
 	// Flood binary data toward the client, which never reads it. The
 	// server-side session writer blocks in ws.WriteMessage while the
-	// 1024-slot write channel is not yet full.
+	// write channel backs up.
 	frame := make([]byte, 4+16*1024)
 	binary.BigEndian.PutUint32(frame, id)
 	flooding := make(chan struct{})
 	go func() {
 		defer close(flooding)
-		for i := 0; i < 512; i++ { // ~8MiB
+		for i := 0; i < 2048; i++ { // ~32MiB
 			if err := listener.WriteMessage(grlws.BinaryMessage, frame); err != nil {
 				return
 			}

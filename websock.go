@@ -98,6 +98,10 @@ func newExecConn(name string, arg ...string) (conn *execConn, err error) {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		// Close the pipes we already created so we don't leak fds.
+		conn.stdin.Close()
+		conn.stdout.Close()
+		conn.stderr.Close()
 		return nil, err
 	}
 	go func() {
@@ -214,7 +218,7 @@ func (wsh *webSocketHandler) setReadTimeout(d time.Duration) *webSocketHandler {
 	return wsh
 }
 
-func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFromWS chan []byte,
+func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFromWS chan []byte, stopCh <-chan struct{},
 	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
 	defer logf(r, logLevelDebug, "WSReader finished")
 	defer onceDone.Do(stopRunning)
@@ -251,7 +255,13 @@ func (wsh *webSocketHandler) wsReader(r *http.Request, c *websocket.Conn, dataFr
 			}
 			injectRequestNrHeader = ""
 		}
-		dataFromWS <- data
+		// Do not block forever if the consumer (sockWriter) has already
+		// exited: abort the send once the handler is shutting down.
+		select {
+		case dataFromWS <- data:
+		case <-stopCh:
+			return
+		}
 	}
 }
 
@@ -284,7 +294,7 @@ loop:
 	}
 }
 
-func (wsh *webSocketHandler) sockReader(r *http.Request, conn net.Conn, dataFromConn chan []byte,
+func (wsh *webSocketHandler) sockReader(r *http.Request, conn net.Conn, dataFromConn chan []byte, stopCh <-chan struct{},
 	onceDone *sync.Once, keepRunning *atomic.Value, stopRunning func()) {
 	defer logf(r, logLevelDebug, "SockReader finished")
 	defer onceDone.Do(stopRunning)
@@ -308,7 +318,13 @@ func (wsh *webSocketHandler) sockReader(r *http.Request, conn net.Conn, dataFrom
 			}
 			break
 		}
-		dataFromConn <- data[:nRead]
+		// Abort the send if the handler is shutting down and the consumer
+		// (wsWriter) is gone, so this goroutine cannot leak.
+		select {
+		case dataFromConn <- data[:nRead]:
+		case <-stopCh:
+			return
+		}
 	}
 }
 
@@ -392,8 +408,13 @@ func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var keepRunning atomic.Value
 	keepRunning.Store(true)
 	done := make(chan struct{})
+	// stopCh is closed as soon as the handler starts shutting down. The reader
+	// goroutines select on it when handing data to the writer goroutines, so
+	// they cannot block forever if a writer has already exited.
+	stopCh := make(chan struct{})
 	stopRunning := func() {
 		keepRunning.Store(false)
+		close(stopCh)
 		time.Sleep(100 * time.Millisecond)
 		close(done)
 	}
@@ -403,7 +424,7 @@ func (wsh *webSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	go wsh.wsWriter(r, c, dataFromConn, &onceDone, &keepRunning, stopRunning)
 	go wsh.sockWriter(r, c, conn, dataFromWS, &onceDone, &keepRunning, stopRunning)
-	go wsh.sockReader(r, conn, dataFromConn, &onceDone, &keepRunning, stopRunning)
-	go wsh.wsReader(r, c, dataFromWS, &onceDone, &keepRunning, stopRunning)
+	go wsh.sockReader(r, conn, dataFromConn, stopCh, &onceDone, &keepRunning, stopRunning)
+	go wsh.wsReader(r, c, dataFromWS, stopCh, &onceDone, &keepRunning, stopRunning)
 	<-done
 }
