@@ -82,13 +82,6 @@ func getWstnlPool(name string) *wstnlPool {
 	return p
 }
 
-func newWstnlHandler(poolName string, cfg *serverConfig) *wstnlHandler {
-	if poolName == "" {
-		poolName = "_"
-	}
-	return &wstnlHandler{poolName: poolName, cfg: cfg}
-}
-
 type wstnlHandler struct {
 	poolName string
 	cfg      *serverConfig
@@ -350,7 +343,7 @@ func (p *wstnlPool) handleClientDisconnect(id uint32) {
 	}
 }
 
-func (p *wstnlPool) handleListenerBinary(l *wstnlListener, data []byte) {
+func (p *wstnlPool) handleListenerBinary(data []byte) {
 	if len(data) < 4 {
 		return
 	}
@@ -491,7 +484,8 @@ func (h *wstnlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			listener.packetsIn.Add(1)
 			listener.bytesIn.Add(uint64(len(data)))
-			if msgType == websocket.TextMessage {
+			switch msgType {
+			case websocket.TextMessage:
 				fields := strings.Fields(string(data))
 				if len(fields) >= 2 {
 					id, err := parseUint32(fields[1])
@@ -504,8 +498,8 @@ func (h *wstnlHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-			} else if msgType == websocket.BinaryMessage {
-				pool.handleListenerBinary(listener, data)
+			case websocket.BinaryMessage:
+				pool.handleListenerBinary(data)
 			}
 		}
 		return
